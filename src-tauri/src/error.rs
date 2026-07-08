@@ -41,6 +41,10 @@ impl AppError {
     pub fn sync(message: impl Into<String>) -> Self {
         Self::new("sync_error", message)
     }
+
+    pub fn ollama(message: impl Into<String>) -> Self {
+        Self::new("ollama_error", message)
+    }
 }
 
 impl From<rusqlite::Error> for AppError {

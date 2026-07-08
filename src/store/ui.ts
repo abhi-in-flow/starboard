@@ -1,7 +1,7 @@
 import { create } from "zustand";
 import type { RepoSort } from "@/types";
 
-export type AppView = "library" | "insights" | "settings";
+export type AppView = "library" | "categories" | "insights" | "settings";
 export type LibraryLayout = "list" | "grid";
 
 type UiState = {

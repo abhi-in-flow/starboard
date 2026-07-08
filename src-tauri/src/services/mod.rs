@@ -1,7 +1,9 @@
 pub mod categories;
+pub mod categorizer;
 pub mod github;
 pub mod github_auth;
 pub mod logging;
+pub mod ollama;
 pub mod repos;
 pub mod search;
 pub mod secrets;

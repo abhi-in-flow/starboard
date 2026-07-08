@@ -214,6 +214,8 @@ pub struct RepoDetail {
     pub fetched_at: String,
     pub unstarred: bool,
     pub category_names: Vec<String>,
+    pub category_id: Option<i64>,
+    pub category_source: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -287,4 +289,65 @@ pub struct CategoryNode {
     pub parent_id: Option<i64>,
     pub count: i64,
     pub children: Vec<CategoryNode>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OllamaStatus {
+    pub available: bool,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TaxonomyCategoryDraft {
+    pub name: String,
+    pub subcategories: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct TaxonomyDraft {
+    pub categories: Vec<TaxonomyCategoryDraft>,
+}
+
+/// Editable taxonomy node with stable DB ids (None = new row).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TaxonomyNodeEdit {
+    pub id: Option<i64>,
+    pub name: String,
+    #[serde(default)]
+    pub subcategories: Vec<TaxonomyNodeEdit>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct TaxonomyEdit {
+    pub categories: Vec<TaxonomyNodeEdit>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CategorizeProgress {
+    pub kind: String,
+    pub current: u32,
+    pub total: u32,
+    pub message: String,
+    #[serde(default)]
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct CategorizeStatus {
+    pub running: bool,
+    pub last_error: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AssignRepoCategoryRequest {
+    pub repo_id: i64,
+    pub category_id: i64,
 }

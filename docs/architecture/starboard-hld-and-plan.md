@@ -262,14 +262,14 @@ Each phase is a self-contained handoff unit with acceptance criteria. Do not sta
 **Acceptance criteria**
 - Type-to-filter feels instant on full library; detail panel matches GitHub's data; keyboard nav (↑/↓ list, Enter opens detail, `/` focuses search).
 
-### Phase 3 — LLM Categorization (agent-days: ~2–3)
+### Phase 3 — LLM Categorization (agent-days: ~2–3) — **done (thinner cut)**
 
 **Deliverables**
 - Ollama client with health check + offline degradation.
 - Taxonomy generation flow with review/edit screen (rename, merge, delete, add before commit).
 - Batched assignment pipeline with structured outputs, progress events, resumability.
-- Category tree sidebar goes live: counts per node, click-to-filter, drag repo → category (manual override), right-click re-categorize single repo.
-- "Categorize new repos" runs automatically post-sync for uncategorized repos only.
+- Category tree sidebar goes live: counts per node, click-to-filter, drag repo → category (manual override), detail-panel re-categorize + manual picker.
+- Categories nav menu for generate / edit-in-place / commit / assign. Post-sync auto-assign deferred to harden pass.
 
 **Acceptance criteria**
 - Full library categorized end-to-end; zero silent taxonomy mutations; manual overrides survive a full re-categorization run; Ollama offline leaves the rest of the app fully functional.

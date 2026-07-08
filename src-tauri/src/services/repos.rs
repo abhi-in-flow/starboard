@@ -61,6 +61,9 @@ pub fn get_repo(conn: &Connection, id: i64) -> AppResult<RepoDetail> {
     };
     let mut detail = map_detail(row)?;
     detail.category_names = load_category_names(conn, id)?;
+    let (category_id, category_source) = load_primary_category(conn, id)?;
+    detail.category_id = category_id;
+    detail.category_source = category_source;
     Ok(detail)
 }
 
@@ -116,6 +119,27 @@ fn query_facets(conn: &Connection, sql: &str, bind: &[String]) -> AppResult<Vec<
         out.push(row?);
     }
     Ok(out)
+}
+
+/// Primary category for a repo: manual override wins, else highest-confidence LLM pick.
+fn load_primary_category(
+    conn: &Connection,
+    repo_id: i64,
+) -> AppResult<(Option<i64>, Option<String>)> {
+    let mut stmt = conn.prepare(
+        "SELECT rc.category_id, rc.source
+         FROM repo_categories rc
+         WHERE rc.repo_id = ?1
+         ORDER BY CASE WHEN rc.source = 'manual' THEN 0 ELSE 1 END,
+                  rc.confidence DESC
+         LIMIT 1",
+    )?;
+    let mut rows = stmt.query([repo_id])?;
+    if let Some(row) = rows.next()? {
+        Ok((row.get(0)?, row.get(1)?))
+    } else {
+        Ok((None, None))
+    }
 }
 
 fn load_category_names(conn: &Connection, repo_id: i64) -> AppResult<Vec<String>> {
@@ -252,6 +276,8 @@ fn map_detail(row: &Row<'_>) -> rusqlite::Result<RepoDetail> {
         fetched_at: row.get(19)?,
         unstarred: row.get::<_, i64>(20)? != 0,
         category_names: Vec::new(),
+        category_id: None,
+        category_source: None,
     })
 }
 

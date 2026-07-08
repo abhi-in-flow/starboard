@@ -96,6 +96,8 @@ export type RepoDetail = {
   fetchedAt: string;
   unstarred: boolean;
   categoryNames: string[];
+  categoryId: number | null;
+  categorySource: string | null;
 };
 
 export type RepoListResult = {
@@ -136,4 +138,46 @@ export type SearchReposRequest = {
   sortDesc?: boolean;
   limit?: number;
   offset?: number;
+};
+
+export type OllamaStatus = {
+  available: boolean;
+  message: string;
+};
+
+export type TaxonomyCategoryDraft = {
+  name: string;
+  subcategories: string[];
+};
+
+export type TaxonomyDraft = {
+  categories: TaxonomyCategoryDraft[];
+};
+
+export type TaxonomyNodeEdit = {
+  id: number | null;
+  name: string;
+  subcategories: TaxonomyNodeEdit[];
+};
+
+export type TaxonomyEdit = {
+  categories: TaxonomyNodeEdit[];
+};
+
+export type CategorizeProgress = {
+  kind: string;
+  current: number;
+  total: number;
+  message: string;
+  error?: string | null;
+};
+
+export type CategorizeStatus = {
+  running: boolean;
+  lastError: string | null;
+};
+
+export type AssignRepoCategoryRequest = {
+  repoId: number;
+  categoryId: number;
 };

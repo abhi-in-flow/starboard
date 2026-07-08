@@ -1,6 +1,7 @@
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { Star } from "lucide-react";
 import { useRef } from "react";
+import { REPO_DND_TYPE } from "@/components/library/CategoryTree";
 import { RepoAvatar } from "@/components/library/RepoAvatar";
 import { formatCount, formatRelative, languageColor } from "@/lib/format";
 import { cn } from "@/lib/utils";
@@ -42,9 +43,14 @@ function RepoRow({
   return (
     <button
       type="button"
+      draggable
+      onDragStart={(e) => {
+        e.dataTransfer.setData(REPO_DND_TYPE, String(repo.id));
+        e.dataTransfer.effectAllowed = "move";
+      }}
       onClick={onSelect}
       className={cn(
-        "flex w-full gap-3 border-b border-border/80 px-4 py-3 text-left transition-colors",
+        "flex w-full cursor-grab gap-3 border-b border-border/80 px-4 py-3 text-left transition-colors active:cursor-grabbing",
         selected ? "bg-accent" : "hover:bg-muted/40",
         compact &&
           "rounded-xl border border-border bg-card px-3 py-3 shadow-sm",

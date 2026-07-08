@@ -1,9 +1,10 @@
-import { BookMarked, LineChart, Settings } from "lucide-react";
+import { BookMarked, FolderTree, LineChart, Settings } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { type AppView, useUiStore } from "@/store/ui";
 
 const navItems: { id: AppView; label: string; icon: typeof BookMarked }[] = [
   { id: "library", label: "Library", icon: BookMarked },
+  { id: "categories", label: "Categories", icon: FolderTree },
   { id: "insights", label: "Insights", icon: LineChart },
   { id: "settings", label: "Settings", icon: Settings },
 ];

@@ -2,15 +2,19 @@ import { invoke } from "@tauri-apps/api/core";
 import type {
   AppSettings,
   AuthStatus,
+  CategorizeStatus,
   CategoryNode,
   LibraryFacets,
   ListReposRequest,
+  OllamaStatus,
   RepoDetail,
   RepoFilters,
   RepoListResult,
   SearchReposRequest,
   SyncResult,
   SyncStatus,
+  TaxonomyDraft,
+  TaxonomyEdit,
   UpdateSettingsRequest,
 } from "@/types";
 
@@ -66,4 +70,42 @@ export function getLibraryFacets(filters?: RepoFilters) {
 
 export function listCategories() {
   return invoke<CategoryNode[]>("list_categories");
+}
+
+export function getOllamaStatus() {
+  return invoke<OllamaStatus>("get_ollama_status");
+}
+
+export function generateTaxonomy() {
+  return invoke<TaxonomyDraft>("generate_taxonomy");
+}
+
+export function getTaxonomyEdit() {
+  return invoke<TaxonomyEdit>("get_taxonomy_edit");
+}
+
+export function updateTaxonomy(edit: TaxonomyEdit) {
+  return invoke<void>("update_taxonomy", { edit });
+}
+
+export function commitTaxonomy(draft: TaxonomyDraft, force = false) {
+  return invoke<void>("commit_taxonomy", { draft, force });
+}
+
+export function startAssignment() {
+  return invoke<void>("start_assignment");
+}
+
+export function getCategorizeStatus() {
+  return invoke<CategorizeStatus>("get_categorize_status");
+}
+
+export function setRepoCategory(repoId: number, categoryId: number) {
+  return invoke<void>("set_repo_category", {
+    request: { repoId, categoryId },
+  });
+}
+
+export function recategorizeRepo(repoId: number) {
+  return invoke<void>("recategorize_repo", { repoId });
 }

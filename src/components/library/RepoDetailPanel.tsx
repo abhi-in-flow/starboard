@@ -1,20 +1,48 @@
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { openUrl } from "@tauri-apps/plugin-opener";
-import { ExternalLink, X } from "lucide-react";
+import { ExternalLink, Loader2, X } from "lucide-react";
 import { MarkdownExcerpt } from "@/components/library/MarkdownExcerpt";
 import { RepoAvatar } from "@/components/library/RepoAvatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
 import { formatCount, formatRelative, languageColor } from "@/lib/format";
-import { getRepo } from "@/lib/tauri";
+import {
+  getOllamaStatus,
+  getRepo,
+  listCategories,
+  recategorizeRepo,
+  setRepoCategory,
+} from "@/lib/tauri";
 import { useUiStore } from "@/store/ui";
+import type { CategoryNode } from "@/types";
 
 type Props = {
   repoId: number;
 };
 
+function flattenCategories(
+  nodes: CategoryNode[],
+  prefix = "",
+): { id: number; label: string }[] {
+  const out: { id: number; label: string }[] = [];
+  for (const node of nodes) {
+    const label = prefix ? `${prefix} / ${node.name}` : node.name;
+    out.push({ id: node.id, label });
+    out.push(...flattenCategories(node.children, label));
+  }
+  return out;
+}
+
 export function RepoDetailPanel({ repoId }: Props) {
+  const queryClient = useQueryClient();
   const setSelectedRepoId = useUiStore((s) => s.setSelectedRepoId);
   const setTopic = useUiStore((s) => s.setTopic);
   const setLanguage = useUiStore((s) => s.setLanguage);
@@ -24,7 +52,39 @@ export function RepoDetailPanel({ repoId }: Props) {
     queryFn: () => getRepo(repoId),
   });
 
+  const categories = useQuery({
+    queryKey: ["categories"],
+    queryFn: listCategories,
+  });
+
+  const ollama = useQuery({
+    queryKey: ["ollamaStatus"],
+    queryFn: getOllamaStatus,
+    refetchInterval: 30_000,
+  });
+
+  const setCategory = useMutation({
+    mutationFn: (categoryId: number) => setRepoCategory(repoId, categoryId),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["repo", repoId] });
+      void queryClient.invalidateQueries({ queryKey: ["categories"] });
+      void queryClient.invalidateQueries({ queryKey: ["repos"] });
+    },
+  });
+
+  const recategorize = useMutation({
+    mutationFn: () => recategorizeRepo(repoId),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["repo", repoId] });
+      void queryClient.invalidateQueries({ queryKey: ["categories"] });
+      void queryClient.invalidateQueries({ queryKey: ["repos"] });
+    },
+  });
+
   const repo = detail.data;
+  const flatCats = flattenCategories(categories.data ?? []);
+  const offline = ollama.data != null && !ollama.data.available;
+  const isManual = repo?.categorySource === "manual";
 
   return (
     <aside className="flex h-full w-[380px] shrink-0 flex-col border-l border-border bg-background">
@@ -132,20 +192,90 @@ export function RepoDetailPanel({ repoId }: Props) {
               </div>
             ) : null}
 
-            {repo.categoryNames.length > 0 ? (
-              <div>
-                <p className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                  Categories
-                </p>
-                <div className="flex flex-wrap gap-1.5">
-                  {repo.categoryNames.map((c) => (
-                    <Badge key={c} variant="secondary">
-                      {c}
+            <div>
+              <p className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                Category
+              </p>
+              <div className="flex flex-col gap-2">
+                <div className="flex flex-wrap items-center gap-2">
+                  {repo.categoryNames.length > 0 ? (
+                    repo.categoryNames.map((c) => (
+                      <Badge key={c} variant="secondary">
+                        {c}
+                      </Badge>
+                    ))
+                  ) : (
+                    <span className="text-sm text-muted-foreground">
+                      Uncategorized
+                    </span>
+                  )}
+                  {repo.categorySource ? (
+                    <Badge variant="outline">
+                      {repo.categorySource === "manual" ? "Manual" : "LLM"}
                     </Badge>
-                  ))}
+                  ) : null}
                 </div>
+                {flatCats.length > 0 ? (
+                  <Select
+                    value={
+                      repo.categoryId != null ? String(repo.categoryId) : ""
+                    }
+                    onValueChange={(v) => {
+                      const id = Number(v);
+                      if (Number.isFinite(id)) {
+                        setCategory.mutate(id);
+                      }
+                    }}
+                  >
+                    <SelectTrigger className="w-full">
+                      <SelectValue placeholder="Set category manually…" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {flatCats.map((c) => (
+                        <SelectItem key={c.id} value={String(c.id)}>
+                          {c.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                ) : (
+                  <p className="text-xs text-muted-foreground">
+                    Commit a taxonomy in Categories first.
+                  </p>
+                )}
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="w-fit gap-1"
+                  disabled={
+                    offline ||
+                    isManual ||
+                    flatCats.length === 0 ||
+                    recategorize.isPending
+                  }
+                  title={
+                    isManual
+                      ? "Manual override — clear via picker change only"
+                      : offline
+                        ? "Ollama offline"
+                        : undefined
+                  }
+                  onClick={() => recategorize.mutate()}
+                >
+                  {recategorize.isPending ? (
+                    <Loader2 className="size-3 animate-spin" />
+                  ) : null}
+                  Re-categorize with LLM
+                </Button>
+                {recategorize.isError ? (
+                  <p className="text-xs text-destructive">
+                    {(recategorize.error as { message?: string })?.message ??
+                      "Re-categorize failed"}
+                  </p>
+                ) : null}
               </div>
-            ) : null}
+            </div>
 
             <Separator />
 

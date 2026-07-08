@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.4.0 — Phase 3 (thinner cut)
+
+- Categories menu: generate taxonomy via Ollama, edit draft, commit (force replace clears assignments).
+- Edit taxonomy: in-place rename/add/remove preserving category ids and assignments.
+- Batched assignment with progress; manual overrides never overwritten; detail picker + LLM re-categorize.
+- Drag repo → category tree for manual override; Ollama offline disables categorize actions with hint.
+
 ## 0.3.0 — Phase 2
 
 - Virtualized library list/grid with sort, hide-unstarred/archived, language/topic filters, and category tree empty state.
