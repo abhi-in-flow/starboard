@@ -10,7 +10,7 @@
 ![License](https://img.shields.io/badge/license-MIT-green)
 
 > [!NOTE]
-> Starboard is a personal project that's under active development. I'm building it to solve my own workflow, so features, UI, and even theroadmap will continue to evolve. Feedback, ideas, and contributions are welcome.
+> Starboard is a personal project that's under active development. I'm building it to solve my own workflow, so features, UI, and even the roadmap will continue to evolve. Feedback, ideas, and contributions are welcome.
 
 Local-first desktop app for organizing GitHub stars.
 
