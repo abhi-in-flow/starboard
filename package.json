@@ -1,0 +1,41 @@
+{
+  "name": "starboard",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview",
+    "tauri": "tauri",
+    "lint": "biome check .",
+    "format": "biome format --write .",
+    "check": "biome check . && bunx tsc --noEmit && cargo clippy --manifest-path src-tauri/Cargo.toml -- -D warnings && cargo test --manifest-path src-tauri/Cargo.toml"
+  },
+  "dependencies": {
+    "@tanstack/react-query": "^5",
+    "@tauri-apps/api": "^2",
+    "@tauri-apps/plugin-opener": "^2",
+    "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
+    "lucide-react": "^0.525.0",
+    "radix-ui": "^1.6.2",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "tailwind-merge": "^3.3.1",
+    "zustand": "^5"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.1.1",
+    "@tailwindcss/vite": "^4.1.11",
+    "@tauri-apps/cli": "^2",
+    "@types/node": "^26.1.1",
+    "@types/react": "^18.3.23",
+    "@types/react-dom": "^18.3.7",
+    "@vitejs/plugin-react": "^4.6.0",
+    "tailwindcss": "^4.1.11",
+    "tw-animate-css": "^1.3.5",
+    "typescript": "~5.8.3",
+    "vite": "^7.0.4"
+  }
+}
