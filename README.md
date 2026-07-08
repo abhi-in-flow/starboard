@@ -44,9 +44,9 @@ Starboard is a local desktop application. GitHub remains the source of truth for
 ## Current Features
 
 - Sync GitHub starred repositories into a local SQLite database
-- Capture the when you starred and the readme among other details
+- Captures when you starred each repo, plus README excerpts and other metadata
 - Fast keyword search using SQLite FTS5
-- Automatic categorization using Ollama (I'm using gemma4:e4b, smaller or other models might fail).
+- Automatic categorization using Ollama (I'm using gemma4:e4b, structured-output/JSON-schema compliance breaks down on small models, will release a benchmark on different models in the future)
 - Manual category overrides
 - Rich repository metadata
 - Local-first architecture
