@@ -12,10 +12,20 @@ Instead of organizing GitHub itself, it keeps a local copy of my starred reposit
 
 Everything runs locally. GitHub remains the source of truth.
 
+## Screenshots
+
+
 <p align="center">
   <img src="./docs/screenshots/1.png" alt="Starboard screenshot" width="1000" />
 </p>
 
+<p align="center">
+  <img src="./docs/screenshots/2.png" alt="Starboard screenshot" width="1000" />
+</p>
+
+<p align="center">
+  <img src="./docs/screenshots/3.png" alt="Starboard screenshot" width="1000" />
+</p>
 ---
 
 ## Current Features
