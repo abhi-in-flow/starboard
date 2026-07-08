@@ -5,12 +5,12 @@
 ![Status](https://img.shields.io/badge/status-WIP-orange)
 ![Windows](https://img.shields.io/badge/platform-Windows-blue)
 ![Rust](https://img.shields.io/badge/Rust-1.90+-black?logo=rust)
-![React](https://img.shields.io/badge/React-19-61DAFB?logo=react)
+![React](https://img.shields.io/badge/React-18-61DAFB?logo=react)
 ![Tauri](https://img.shields.io/badge/Tauri-2-24C8DB?logo=tauri)
 ![License](https://img.shields.io/badge/license-MIT-green)
 
 > [!NOTE]
-> Starboard is a personal project that's under active development. I'm building it to solve my own workflow, so features, UI, and even the roadmap will continue to evolve. Feedback, ideas, and contributions are welcome.
+> Starboard is a personal project that's under active development. I'm building it to solve my own workflow, so features, UI, and even theroadmap will continue to evolve. Feedback, ideas, and contributions are welcome.
 
 Local-first desktop app for organizing GitHub stars.
 
@@ -38,6 +38,7 @@ Starboard is a local desktop application. GitHub remains the source of truth for
 <p align="center">
   <img src="./docs/screenshots/3.png" alt="Starboard screenshot" width="1000" />
 </p>
+
 ---
 
 ## Current Features
