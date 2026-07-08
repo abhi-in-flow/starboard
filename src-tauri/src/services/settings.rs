@@ -7,6 +7,8 @@ const KEY_OLLAMA_BASE_URL: &str = "ollama_base_url";
 const KEY_OLLAMA_CHAT_MODEL: &str = "ollama_chat_model";
 const KEY_OLLAMA_EMBED_MODEL: &str = "ollama_embed_model";
 const KEY_GITHUB_USERNAME: &str = "github_username";
+pub const KEY_STARRED_ETAG: &str = "starred_etag";
+pub const KEY_LAST_SYNCED_AT: &str = "last_synced_at";
 
 pub fn get_settings(conn: &Connection) -> AppResult<AppSettings> {
     let defaults = AppSettings::default();
@@ -54,7 +56,7 @@ pub fn clear_github_username(conn: &Connection) -> AppResult<()> {
     Ok(())
 }
 
-fn get_value(conn: &Connection, key: &str) -> AppResult<Option<String>> {
+pub fn get_value(conn: &Connection, key: &str) -> AppResult<Option<String>> {
     let mut stmt = conn.prepare("SELECT value FROM settings WHERE key = ?1")?;
     let mut rows = stmt.query([key])?;
     if let Some(row) = rows.next()? {
@@ -64,7 +66,7 @@ fn get_value(conn: &Connection, key: &str) -> AppResult<Option<String>> {
     }
 }
 
-fn set_value(conn: &Connection, key: &str, value: &str) -> AppResult<()> {
+pub fn set_value(conn: &Connection, key: &str, value: &str) -> AppResult<()> {
     conn.execute(
         "INSERT INTO settings (key, value) VALUES (?1, ?2)
          ON CONFLICT(key) DO UPDATE SET value = excluded.value",

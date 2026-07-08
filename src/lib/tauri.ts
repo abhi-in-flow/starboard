@@ -1,5 +1,11 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { AppSettings, AuthStatus, UpdateSettingsRequest } from "@/types";
+import type {
+  AppSettings,
+  AuthStatus,
+  SyncResult,
+  SyncStatus,
+  UpdateSettingsRequest,
+} from "@/types";
 
 export function getSettings() {
   return invoke<AppSettings>("get_settings");
@@ -19,4 +25,16 @@ export function connectGithub(pat: string) {
 
 export function disconnectGithub() {
   return invoke<AuthStatus>("disconnect_github");
+}
+
+export function startSync(full = false) {
+  return invoke<SyncResult>("start_sync", { full });
+}
+
+export function resumeReadmeQueue() {
+  return invoke<void>("resume_readme_queue");
+}
+
+export function getSyncStatus() {
+  return invoke<SyncStatus>("get_sync_status");
 }

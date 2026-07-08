@@ -24,7 +24,13 @@ bun run lint
 bunx tsc --noEmit
 ```
 
+## Data
+
+- SQLite DB (Windows): `%APPDATA%\com.brocode.starboard\starboard.db`
+- GitHub PAT: OS credential store (`starboard` / `github_pat`) — never in the DB
+- Flush DB: quit the app, delete `starboard.db` (+ `-wal`/`-shm` if present), relaunch
+
 ## Docs
 
 - Architecture: `docs/architecture/starboard-hld-and-plan.md`
-- Phase tasks: `docs/plan/`
+- Phase tasks: `docs/plan/` (Phase 0–1 done; next is Phase 2 library UI)

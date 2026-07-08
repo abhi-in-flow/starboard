@@ -1,6 +1,7 @@
 # Task: Phase 1 — Sync Engine
 
-Read `CLAUDE.md` and `docs/HLD.md` §4.1 first. Depends on Phase 0.
+**Status:** Complete (as-built notes below)  
+Read `CLAUDE.md` and `docs/architecture/starboard-hld-and-plan.md` §4.1 first. Depends on Phase 0.
 
 ## Goal
 Full + incremental sync of the user's starred repos into SQLite, with `starred_at`, README excerpts, and live progress in the UI.
@@ -15,15 +16,21 @@ Full + incremental sync of the user's starred repos into SQLite, with `starred_a
 2. Sync service:
    - **Full sync:** fetch all pages → upsert into `repos` → set difference vs local non-unstarred rows → flag missing ones `unstarred = 1`. Record a `sync_log` row (kind `full`).
    - **Incremental sync:** ETag fast path; on change, fetch pages until a page contains only already-known `(repo_id, starred_at)` pairs, then stop (list is newest-first).
-3. README excerpt queue (kind `readme`): for repos with NULL `readme_excerpt`, `GET /repos/{owner}/{repo}/readme` → base64 decode → strip badges/HTML/code fences → store first 1,500 chars. Throttle to ~2 req/s. Resumable: queue state derivable from NULL columns, safe to kill and relaunch. 404 (no README) writes empty string, not NULL, so it isn't retried forever.
-4. Progress: emit Tauri event `sync://progress` with `{ kind, current, total, message }`. UI header gets a Sync button, progress bar, and "last synced <relative time>".
-5. FTS5 triggers from Phase 0 must be verified to fire on these upserts (add a test: insert repo → FTS match found).
+3. README excerpt queue (kind `readme`): for repos with NULL `readme_excerpt`, `GET /repos/{owner}/{repo}/readme` → base64 decode → strip badges/HTML/code fences → store first 1,500 chars (UTF-8–safe truncate). Runs **in the background after list sync returns**, with **~6 concurrent workers** and a shared **~6 req/s** spacing gate. Resumable via NULL columns; app launch and **Resume READMEs** restart pending work. Soft-fail per repo (encoding `none`, decode errors, most HTTP errors) → write `""` and continue. Hard-pause only on rate limits (403/429) so remaining NULLs can be retried.
+4. Progress: emit Tauri event `sync://progress` with `{ kind, current, total, message, error? }`. UI header: Sync / Full sync, progress bar, last-synced relative time, pending README count, Resume READMEs.
+5. FTS5 triggers from Phase 0 verified to fire on upserts (unit test: insert repo → FTS match found).
 
 ## Out of scope
 Categorization, search UI beyond verifying FTS rows exist, insights.
 
 ## Acceptance criteria
-- Full sync of a real library completes; `SELECT COUNT(*) FROM repos WHERE starred_at IS NULL` = 0.
-- Immediate second sync makes ≤2 network requests (assert via wiremock request count in test; manually confirm 304 path).
-- Kill app mid-README queue → relaunch → queue resumes, no duplicate fetches for filled rows.
-- Unstarring a repo on GitHub then full-syncing sets `unstarred=1` without deleting the row.
+- [x] Full sync of a real library completes; every repo has non-null `starred_at`.
+- [x] Immediate second sync hits ETag 304 path (wiremock + manual).
+- [x] Kill app mid-README queue → relaunch / Resume READMEs → continues without re-fetching filled rows.
+- [x] Unstarring a repo on GitHub then full-syncing sets `unstarred=1` without deleting the row.
+
+## As-built notes
+- DB path (Windows): `%APPDATA%\com.brocode.starboard\starboard.db`
+- Settings keys added: `starred_etag`, `last_synced_at`
+- Commands: `start_sync`, `resume_readme_queue`, `get_sync_status`
+- Deviations from original ~2 req/s serial queue: concurrent background queue (approved during Phase 1)

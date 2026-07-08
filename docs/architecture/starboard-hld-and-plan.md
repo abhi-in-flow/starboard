@@ -167,7 +167,7 @@ CREATE VIRTUAL TABLE repos_fts USING fts5(
 - **Pagination:** `per_page=100`, follow the `Link: rel="next"` header.
 - **Conditional requests:** store the ETag of page 1; on incremental sync, send `If-None-Match` — a `304` means nothing new and costs 0 rate-limit points.
 - **Rate limits:** 5,000 req/hr authenticated. Read `x-ratelimit-remaining` / `x-ratelimit-reset` and back off with jitter when `remaining < 50`. A 2,000-star library costs ~20 requests for a full list sync; README fetches are the expensive part.
-- **README fetch (lazy, batched):** `GET /repos/{owner}/{repo}/readme` → base64 decode → strip markdown noise → store first ~1,500 chars in `readme_excerpt`. Run as a background queue after list sync, throttled (e.g., 2 req/s), resumable via `sync_log`.
+- **README fetch (lazy, batched):** `GET /repos/{owner}/{repo}/readme` → base64 decode → strip markdown noise → store first ~1,500 chars in `readme_excerpt` (UTF-8–safe truncate). Runs as a **background** queue after list sync returns (does not block sync completion). Concurrent workers (~6 in-flight) with a shared ~6 req/s spacing gate; soft-fail per repo (write `""` and continue); hard-pause only on 403/429. Resumable via NULL `readme_excerpt` columns + `resume_readme_queue` / app relaunch.
 - **Unstar detection:** full sync computes set difference vs local `repos` and flags `unstarred = 1`.
 
 ### 4.2 Ollama
@@ -224,24 +224,24 @@ Charting: Recharts.
 
 Each phase is a self-contained handoff unit with acceptance criteria. Do not start a phase until the previous one's criteria pass.
 
-### Phase 0 — Scaffold & Foundations (agent-days: ~1)
+### Phase 0 — Scaffold & Foundations (agent-days: ~1) — **done**
 
 **Deliverables**
 - `create-tauri-app` scaffold: Tauri 2.x + React + TS + Vite; Tailwind + shadcn/ui wired.
 - SQLite opened in Tauri app-data dir; migration runner with migration 001 (full schema from §3, minus vec0).
 - Settings service + UI stub: Ollama base URL, model names, GitHub username.
 - PAT flow: input field → validate via `GET /user` → store in OS keyring; never rendered back in full.
-- CI-ish basics: `cargo clippy`, `cargo test`, `eslint`, `tsc --noEmit` all clean.
+- CI-ish basics: `cargo clippy`, `cargo test`, Biome, `tsc --noEmit` all clean.
 
 **Acceptance criteria**
 - App launches on Windows 11; DB file created with all tables; PAT survives app restart via keyring; invalid PAT shows a clear error.
 
-### Phase 1 — Sync Engine (agent-days: ~2)
+### Phase 1 — Sync Engine (agent-days: ~2) — **done**
 
 **Deliverables**
 - `github.rs`: paginated starred fetch with `star+json` media type, ETag caching, rate-limit backoff.
 - Full sync + incremental sync commands; unstar soft-delete diffing; `sync_log` records.
-- Background README-excerpt queue (throttled, resumable).
+- Background concurrent README-excerpt queue (resumable; soft-fail per repo; Resume READMEs command).
 - Tauri event stream `sync://progress` → UI progress bar (page N of M, repos synced, READMEs fetched).
 - FTS5 triggers live; index populated on sync.
 
@@ -315,7 +315,7 @@ Each phase is a self-contained handoff unit with acceptance criteria. Do not sta
 | Risk | Mitigation |
 |---|---|
 | Ollama on a different machine (LAN) is unreachable | Configurable base URL, health check, full offline degradation |
-| GitHub secondary rate limits during README queue | Throttle to ~2 req/s, exponential backoff on 403 with `retry-after` |
+| GitHub secondary rate limits during README queue | Concurrent queue capped (~6 in-flight / ~6 req/s), exponential backoff on 403/429 with `retry-after`; Resume READMEs for remaining NULLs |
 | Local model produces off-taxonomy categories | Structured outputs + strict mapping to existing taxonomy, `Uncategorized` fallback |
 | Embedding model swap breaks vec0 dimension | Dimension stored in settings; migration drops/rebuilds embeddings table |
 | FTS/embeddings drift from repos table | Triggers for FTS; embed queue keyed on content hash |

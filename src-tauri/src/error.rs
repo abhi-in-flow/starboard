@@ -37,6 +37,10 @@ impl AppError {
     pub fn keyring(message: impl Into<String>) -> Self {
         Self::new("keyring_error", message)
     }
+
+    pub fn sync(message: impl Into<String>) -> Self {
+        Self::new("sync_error", message)
+    }
 }
 
 impl From<rusqlite::Error> for AppError {
