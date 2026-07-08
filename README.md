@@ -4,13 +4,13 @@ Local-first desktop app for organizing GitHub stars.
 
 I tend to star interesting repositories while browsing GitHub, Hacker News, Reddit, Twitter, and blog posts. After a few months, those stars turn into a giant pile of bookmarks that I rarely revisit.
 
-GitHub Lists help, but I almost never remembered to organize repositories as I starred them. I initially tried using Claude in the browser to automate categorization and maintain GitHub Lists, but it quickly became too slow and wasn't something I could rely on long term.
+GitHub Lists help, but I almost never remember to organize repositories as I starred them. I initially tried using Claude in the browser to automate categorization and maintain GitHub Lists, but it quickly became too slow and wasn't something I could rely on long term.
 
 Starboard is my attempt to solve that problem properly.
 
 Instead of organizing GitHub itself, it keeps a local copy of my starred repositories, enriches them with metadata, automatically categorizes them using a local LLM, and makes them much easier to search, browse, and rediscover.
 
-Everything runs locally. GitHub remains the source of truth.
+Starboard is a local desktop application. GitHub remains the source of truth for your stars, while all organization and metadata are managed locally.
 
 ## Screenshots
 
@@ -31,9 +31,9 @@ Everything runs locally. GitHub remains the source of truth.
 ## Current Features
 
 - Sync GitHub starred repositories into a local SQLite database
-- Preserve original `starred_at` timestamps
+- Capture the when you starred and the readme among other details
 - Fast keyword search using SQLite FTS5
-- Automatic categorization using Ollama
+- Automatic categorization using Ollama (I'm using gemma4:e4b, smaller or other models might fail).
 - Manual category overrides
 - Rich repository metadata
 - Local-first architecture
@@ -57,9 +57,9 @@ The project is being built incrementally.
 - Better repository discovery
 - Smarter filtering and navigation
 
-### Later
+### Future ideas
 
-An **Insights** page answering questions like:
+One thing I'm particularly interested in building is an **Insights** page that answers questions like:
 
 - When do I usually star repositories?
 - What am I actually interested in?
@@ -67,7 +67,9 @@ An **Insights** page answering questions like:
 - Which technologies am I exploring more?
 - Which repositories have I forgotten about?
 
-Beyond that, I expect the project to evolve based on how I use it. The goal isn't to replace GitHub, but to build a better personal knowledge library around the repositories I already star.
+Beyond that, I'm intentionally keeping the roadmap flexible.
+
+This project is primarily built to solve my own workflow, but I'm curious to see how other people end up using it. If there are ideas that genuinely improve the experience of managing and rediscovering GitHub stars, I'm open to them. Contributions, discussions, and feature suggestions are always welcome.
 
 ---
 
@@ -167,13 +169,14 @@ starboard.db-shm
 
 ---
 
-## Why local-first?
+## Design Principles
 
-A few design decisions that won't change:
+A few design decisions that are unlikely to change:
 
-- GitHub is the source of truth.
-- Organization happens locally.
-- The GitHub PAT stays in the OS keyring.
-- Ollama is optional.
-- Manual categories always win over AI.
-- No cloud service required.
+- GitHub is the source of truth for starred repositories.
+- Organization happens locally and never modifies GitHub.
+- The GitHub PAT stays in the OS credential store.
+- Manual categories always take precedence over AI-generated ones - Unless a better and more flexible taxonomy generation engine is added.
+- Your repository data stays local.
+
+Today, Starboard uses Ollama for categorization because I wanted everything to work locally by default. I'd eventually like to support additional providers (OpenAI, Anthropic, and OpenAI-compatible APIs), allowing users to choose whichever model they prefer while keeping Starboard itself a local desktop application.
