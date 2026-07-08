@@ -5,7 +5,7 @@ mod services;
 
 use tauri::Manager;
 
-use commands::{auth, settings, sync};
+use commands::{auth, repos, settings, sync};
 use services::store::{self, DbState};
 use services::sync::SyncState;
 
@@ -31,6 +31,11 @@ pub fn run() {
             sync::start_sync,
             sync::resume_readme_queue,
             sync::get_sync_status,
+            repos::list_repos,
+            repos::search_repos,
+            repos::get_repo,
+            repos::get_library_facets,
+            repos::list_categories,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

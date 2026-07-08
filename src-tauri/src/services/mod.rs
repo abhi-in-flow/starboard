@@ -1,6 +1,9 @@
+pub mod categories;
 pub mod github;
 pub mod github_auth;
 pub mod logging;
+pub mod repos;
+pub mod search;
 pub mod secrets;
 pub mod settings;
 pub mod store;

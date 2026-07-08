@@ -1,6 +1,8 @@
+use std::sync::OnceLock;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use rand::Rng;
+use regex::Regex;
 use reqwest::header::{HeaderMap, HeaderValue, ACCEPT, AUTHORIZATION, LINK, USER_AGENT};
 use reqwest::{Client, Response, StatusCode};
 
@@ -270,21 +272,83 @@ pub fn strip_readme_noise(markdown: &str) -> String {
         if in_fence {
             continue;
         }
-        if trimmed.starts_with("<img") || trimmed.starts_with("<p align") {
+        // Drop badge / align / media chrome that dominates many READMEs.
+        if is_readme_noise_line(trimmed) {
             continue;
         }
-        if trimmed.contains("![") && trimmed.contains("](") && trimmed.contains("badge") {
+        let cleaned_line = strip_html_keep_text(line);
+        if cleaned_line.trim().is_empty() {
             continue;
         }
         if !out.is_empty() {
             out.push('\n');
         }
-        out.push_str(line);
+        out.push_str(&cleaned_line);
         if out.len() >= 1500 {
             break;
         }
     }
-    truncate_utf8(&out, 1500)
+    // Truncation can still split a leftover tag if any slipped through.
+    truncate_utf8(&strip_html_keep_text(&out), 1500)
+}
+
+fn is_readme_noise_line(trimmed: &str) -> bool {
+    let lower = trimmed.to_ascii_lowercase();
+    if lower.starts_with("<img")
+        || lower.starts_with("<picture")
+        || lower.starts_with("<p align")
+        || lower.starts_with("<div align")
+        || lower.starts_with("<h1 align")
+        || lower.starts_with("<br")
+        || lower == "<p>"
+        || lower == "</p>"
+        || lower == "<div>"
+        || lower == "</div>"
+    {
+        return true;
+    }
+    if lower.contains("shields.io") || (lower.contains("badge") && lower.contains("](")) {
+        return true;
+    }
+    if trimmed.contains("![") && trimmed.contains("](") && lower.contains("badge") {
+        return true;
+    }
+    // Empty anchor wrappers left after badge images are stripped.
+    if lower.starts_with("<a ") && !lower.contains('>') {
+        return true;
+    }
+    if lower == "</a>" || (lower.starts_with("<a ") && !contains_visible_anchor_text(trimmed)) {
+        return true;
+    }
+    false
+}
+
+fn contains_visible_anchor_text(line: &str) -> bool {
+    let text = strip_html_keep_text(line);
+    !text.trim().is_empty()
+}
+
+/// Remove HTML tags but keep inner text so truncated READMEs don't show raw markup.
+pub fn strip_html_keep_text(input: &str) -> String {
+    static TAG_RE: OnceLock<Regex> = OnceLock::new();
+    static DANGLING_RE: OnceLock<Regex> = OnceLock::new();
+    let tag_re = TAG_RE.get_or_init(|| Regex::new(r"(?is)<[^>]+>").expect("html tag regex"));
+    let dangling_re =
+        DANGLING_RE.get_or_init(|| Regex::new(r"(?is)<[^>]*$").expect("dangling tag regex"));
+    let without_complete = tag_re.replace_all(input, "");
+    let without_tags = dangling_re.replace_all(&without_complete, "");
+    decode_basic_entities(&without_tags)
+}
+
+fn decode_basic_entities(input: &str) -> String {
+    input
+        .replace("&amp;", "&")
+        .replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&quot;", "\"")
+        .replace("&#39;", "'")
+        .replace("&apos;", "'")
+        .replace("&nbsp;", " ")
 }
 
 /// Truncate to at most `max_bytes` without splitting a UTF-8 codepoint.
@@ -333,6 +397,33 @@ mod tests {
         assert!(cleaned.contains("World"));
         assert!(!cleaned.contains("code"));
         assert!(!cleaned.contains("badge"));
+    }
+
+    #[test]
+    fn strip_readme_removes_html_tags_and_dangling_truncation() {
+        let md = r#"<p>
+<strong>Mobile-first web interface for <a href="https://opencode.ai">OpenCode</a> AI agents.</strong>
+</p>
+<a href="https://github.com/example/repo/blob/main/LICENSE">
+</a>
+<a href="https://github.com/example/repo/stargazers">
+Quick Start
+On first launch, y"#;
+        let cleaned = strip_readme_noise(md);
+        assert!(cleaned.contains("Mobile-first web interface for OpenCode AI agents."));
+        assert!(cleaned.contains("Quick Start"));
+        assert!(!cleaned.contains("<p>"));
+        assert!(!cleaned.contains("</p>"));
+        assert!(!cleaned.contains("<strong>"));
+        assert!(!cleaned.contains("<a href"));
+        assert!(!cleaned.contains("</a>"));
+    }
+
+    #[test]
+    fn strip_html_keep_text_handles_incomplete_tag() {
+        let s = r#"Hello <a href="https://example.com"#;
+        let cleaned = strip_html_keep_text(s);
+        assert_eq!(cleaned, "Hello ");
     }
 
     #[test]

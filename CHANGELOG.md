@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.3.0 — Phase 2
+
+- Virtualized library list/grid with sort, hide-unstarred/archived, language/topic filters, and category tree empty state.
+- FTS5 keyword search (`search_repos`) plus browse (`list_repos`); detail panel on selection with sanitized Markdown README excerpt and Open on GitHub.
+- Keyboard: `/` search, ↑/↓ select, Esc closes detail / clears query / clears filters.
+- Library visual polish: owner avatars (`github.com/{owner}.png`), richer repo rows, rounded filter pills, search `/` hint.
+
 ## 0.2.0 — Phase 1
 
 - Add GitHub starred-repo sync with `star+json` Accept header, pagination, ETag 304 fast path, and rate-limit backoff.

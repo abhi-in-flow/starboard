@@ -173,3 +173,118 @@ impl From<StarredItem> for StarredRepo {
         }
     }
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RepoSummary {
+    pub id: i64,
+    pub full_name: String,
+    pub description: Option<String>,
+    pub language: Option<String>,
+    pub stars_count: Option<i64>,
+    pub starred_at: String,
+    pub pushed_at: Option<String>,
+    pub archived: bool,
+    pub unstarred: bool,
+    pub topics: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RepoDetail {
+    pub id: i64,
+    pub full_name: String,
+    pub owner: String,
+    pub name: String,
+    pub description: Option<String>,
+    pub language: Option<String>,
+    pub topics: Vec<String>,
+    pub stars_count: Option<i64>,
+    pub forks_count: Option<i64>,
+    pub open_issues: Option<i64>,
+    pub license: Option<String>,
+    pub homepage: Option<String>,
+    pub html_url: String,
+    pub archived: bool,
+    pub fork: bool,
+    pub repo_created_at: Option<String>,
+    pub pushed_at: Option<String>,
+    pub starred_at: String,
+    pub readme_excerpt: Option<String>,
+    pub fetched_at: String,
+    pub unstarred: bool,
+    pub category_names: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct RepoFilters {
+    pub language: Option<String>,
+    pub topic: Option<String>,
+    pub category_id: Option<i64>,
+    pub hide_unstarred: Option<bool>,
+    pub hide_archived: Option<bool>,
+    pub archived_only: Option<bool>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "camelCase")]
+pub enum RepoSort {
+    #[default]
+    StarredAt,
+    Stars,
+    PushedAt,
+    Name,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ListReposRequest {
+    pub filters: Option<RepoFilters>,
+    pub sort: Option<RepoSort>,
+    pub sort_desc: Option<bool>,
+    pub limit: Option<i64>,
+    pub offset: Option<i64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SearchReposRequest {
+    pub query: String,
+    pub filters: Option<RepoFilters>,
+    pub sort: Option<RepoSort>,
+    pub sort_desc: Option<bool>,
+    pub limit: Option<i64>,
+    pub offset: Option<i64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RepoListResult {
+    pub items: Vec<RepoSummary>,
+    pub total: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FacetCount {
+    pub name: String,
+    pub count: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LibraryFacets {
+    pub languages: Vec<FacetCount>,
+    pub topics: Vec<FacetCount>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CategoryNode {
+    pub id: i64,
+    pub name: String,
+    pub parent_id: Option<i64>,
+    pub count: i64,
+    pub children: Vec<CategoryNode>,
+}

@@ -13,7 +13,7 @@ export function Sidebar() {
   const setView = useUiStore((s) => s.setView);
 
   return (
-    <aside className="flex w-56 shrink-0 flex-col border-r border-sidebar-border bg-sidebar text-sidebar-foreground">
+    <aside className="flex w-48 shrink-0 flex-col border-r border-sidebar-border bg-sidebar text-sidebar-foreground">
       <div className="border-b border-sidebar-border px-4 py-5">
         <p className="text-lg font-semibold tracking-tight">Starboard</p>
         <p className="text-xs text-muted-foreground">GitHub stars, organized</p>

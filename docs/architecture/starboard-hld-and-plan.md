@@ -250,11 +250,11 @@ Each phase is a self-contained handoff unit with acceptance criteria. Do not sta
 - Second sync with no changes makes ≤2 network requests (ETag 304 path).
 - Killing the app mid-README-queue and relaunching resumes without duplicating work.
 
-### Phase 2 — Library UI & Keyword Search (agent-days: ~2–3)
+### Phase 2 — Library UI & Keyword Search (agent-days: ~2–3) — **done**
 
 **Deliverables**
 - Library view: virtualized repo grid/list (5k rows smooth), sort by starred_at / stars / pushed_at / name.
-- Repo detail panel: all stats from §3, topic chips, README excerpt, "Open on GitHub" (shell open).
+- Repo detail panel: all stats from §3, topic chips, sanitized Markdown README excerpt, "Open on GitHub" (shell open).
 - Search bar → FTS5 with prefix match; filter chips: language, category (empty until Phase 3), archived, topic.
 - Category tree sidebar (renders empty-state pre-Phase 3).
 - Sync button + last-synced indicator in the header.

@@ -2,6 +2,13 @@ import { invoke } from "@tauri-apps/api/core";
 import type {
   AppSettings,
   AuthStatus,
+  CategoryNode,
+  LibraryFacets,
+  ListReposRequest,
+  RepoDetail,
+  RepoFilters,
+  RepoListResult,
+  SearchReposRequest,
   SyncResult,
   SyncStatus,
   UpdateSettingsRequest,
@@ -37,4 +44,26 @@ export function resumeReadmeQueue() {
 
 export function getSyncStatus() {
   return invoke<SyncStatus>("get_sync_status");
+}
+
+export function listRepos(request: ListReposRequest = {}) {
+  return invoke<RepoListResult>("list_repos", { request });
+}
+
+export function searchRepos(request: SearchReposRequest) {
+  return invoke<RepoListResult>("search_repos", { request });
+}
+
+export function getRepo(id: number) {
+  return invoke<RepoDetail>("get_repo", { id });
+}
+
+export function getLibraryFacets(filters?: RepoFilters) {
+  return invoke<LibraryFacets>("get_library_facets", {
+    filters: filters ?? null,
+  });
+}
+
+export function listCategories() {
+  return invoke<CategoryNode[]>("list_categories");
 }
