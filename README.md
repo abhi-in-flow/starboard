@@ -1,5 +1,17 @@
 # Starboard
 
+> 🚧 **Work in Progress** — Starboard is under active development. Features and APIs may change as I continue building and refining the project.
+
+![Status](https://img.shields.io/badge/status-WIP-orange)
+![Windows](https://img.shields.io/badge/platform-Windows-blue)
+![Rust](https://img.shields.io/badge/Rust-1.90+-black?logo=rust)
+![React](https://img.shields.io/badge/React-19-61DAFB?logo=react)
+![Tauri](https://img.shields.io/badge/Tauri-2-24C8DB?logo=tauri)
+![License](https://img.shields.io/badge/license-MIT-green)
+
+> [!NOTE]
+> Starboard is a personal project that's under active development. I'm building it to solve my own workflow, so features, UI, and even the roadmap will continue to evolve. Feedback, ideas, and contributions are welcome.
+
 Local-first desktop app for organizing GitHub stars.
 
 I tend to star interesting repositories while browsing GitHub, Hacker News, Reddit, Twitter, and blog posts. After a few months, those stars turn into a giant pile of bookmarks that I rarely revisit.
