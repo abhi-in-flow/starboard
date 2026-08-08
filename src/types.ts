@@ -210,3 +210,82 @@ export type EmbedStatus = {
   dimension: number;
   needRebuild: boolean;
 };
+
+export type InsightsDateRange = {
+  preset?: string | null;
+  start?: string | null;
+  end?: string | null;
+};
+
+export type InsightsRequest = {
+  range?: InsightsDateRange | null;
+  /** Minutes east of UTC; pass `-new Date().getTimezoneOffset()`. */
+  utcOffsetMinutes?: number | null;
+};
+
+export type InsightsMeta = {
+  totalStars: number;
+  spanDays: number;
+  shortHistory: boolean;
+  rangeStart: string | null;
+  rangeEnd: string | null;
+};
+
+export type TimelineBucket = {
+  period: string;
+  count: number;
+};
+
+export type StarringTimeline = {
+  weekly: TimelineBucket[];
+  monthly: TimelineBucket[];
+};
+
+export type HeatmapCell = {
+  /** 0 = Monday … 6 = Sunday */
+  dayOfWeek: number;
+  hour: number;
+  count: number;
+};
+
+export type SharePoint = {
+  period: string;
+  name: string;
+  count: number;
+  share: number;
+};
+
+export type InterestMetric = {
+  category: string;
+  repoCount: number;
+  firstStarred: string | null;
+  lastStarred: string | null;
+  recentVelocity: number;
+  lifetimeVelocity: number;
+  badge: "rising" | "dormant" | "steady" | string;
+};
+
+export type FunFacts = {
+  longestStreakDays: number;
+  biggestDayCount: number;
+  biggestDayDate: string | null;
+  firstStarAt: string | null;
+  firstStarRepo: string | null;
+  oldestRepoCreatedAt: string | null;
+  oldestRepoName: string | null;
+};
+
+export type InsightsDashboard = {
+  meta: InsightsMeta;
+  timeline: StarringTimeline;
+  heatmap: HeatmapCell[];
+  interestDrift: SharePoint[];
+  languageTrend: SharePoint[];
+  interestMetrics: InterestMetric[];
+  funFacts: FunFacts;
+};
+
+export type LibraryExport = {
+  markdown: string;
+  json: string;
+};
