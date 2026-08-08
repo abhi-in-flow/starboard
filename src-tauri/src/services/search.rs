@@ -71,21 +71,7 @@ pub fn rrf_merge(ranked_lists: &[Vec<i64>], k: i64) -> Vec<(i64, f64)> {
 }
 
 pub fn search_repos(conn: &Connection, req: SearchReposRequest) -> AppResult<RepoListResult> {
-    let mode = req.mode.clone().unwrap_or(SearchMode::Keyword);
-    match mode {
-        SearchMode::Keyword => search_keyword(conn, req),
-        SearchMode::Semantic | SearchMode::Hybrid => {
-            // Sync path cannot embed; callers should use search_repos_async.
-            // Fall back to keyword so a mistaken sync invoke still works.
-            let mut result = search_keyword(conn, req)?;
-            result.hint = Some(
-                "Semantic/Hybrid search requires the async search path; fell back to Keyword"
-                    .into(),
-            );
-            result.mode_used = Some(SearchMode::Keyword);
-            Ok(result)
-        }
-    }
+    search_keyword(conn, req)
 }
 
 /// Async entry: embeds the query when mode is Semantic or Hybrid.
@@ -95,7 +81,7 @@ pub async fn search_repos_async(
 ) -> AppResult<RepoListResult> {
     let mode = req.mode.clone().unwrap_or(SearchMode::Keyword);
     if mode == SearchMode::Keyword || req.query.trim().is_empty() {
-        return with_db(app, |conn| search_keyword(conn, req));
+        return with_db(app, |conn| search_repos(conn, req));
     }
 
     let settings = with_db(app, settings::get_settings)?;
@@ -115,7 +101,7 @@ pub async fn search_repos_async(
     })?;
 
     if settings.embeddings_need_rebuild || embedded_coverage.1 == 0 {
-        let mut result = with_db(app, |conn| search_keyword(conn, req))?;
+        let mut result = with_db(app, |conn| search_repos(conn, req))?;
         result.mode_used = Some(SearchMode::Keyword);
         result.hint = Some(
             "Embeddings missing or need rebuild — using Keyword search. Build embeddings to enable Semantic/Hybrid."
@@ -127,7 +113,7 @@ pub async fn search_repos_async(
     let client = match OllamaClient::for_embeddings(&settings) {
         Ok(c) => c,
         Err(e) => {
-            let mut result = with_db(app, |conn| search_keyword(conn, req))?;
+            let mut result = with_db(app, |conn| search_repos(conn, req))?;
             result.mode_used = Some(SearchMode::Keyword);
             result.hint = Some(format!("Ollama unavailable ({}) — using Keyword search", e.message));
             return Ok(result);
@@ -136,7 +122,7 @@ pub async fn search_repos_async(
 
     let health = client.health_check().await?;
     if !health.available {
-        let mut result = with_db(app, |conn| search_keyword(conn, req))?;
+        let mut result = with_db(app, |conn| search_repos(conn, req))?;
         result.mode_used = Some(SearchMode::Keyword);
         result.hint = Some(format!(
             "Ollama offline — using Keyword search. {}",
@@ -148,7 +134,7 @@ pub async fn search_repos_async(
     let query_vec = match client.embed_one(req.query.trim()).await {
         Ok(v) => v,
         Err(e) => {
-            let mut result = with_db(app, |conn| search_keyword(conn, req))?;
+            let mut result = with_db(app, |conn| search_repos(conn, req))?;
             result.mode_used = Some(SearchMode::Keyword);
             result.hint = Some(format!(
                 "Query embedding failed ({}) — using Keyword search",
@@ -159,7 +145,7 @@ pub async fn search_repos_async(
     };
 
     if query_vec.len() as i64 != settings.embed_dimension {
-        let mut result = with_db(app, |conn| search_keyword(conn, req))?;
+        let mut result = with_db(app, |conn| search_repos(conn, req))?;
         result.mode_used = Some(SearchMode::Keyword);
         result.hint = Some(format!(
             "Embedding dimension mismatch (got {}, expected {}) — using Keyword search",
@@ -172,7 +158,7 @@ pub async fn search_repos_async(
     with_db(app, |conn| match mode {
         SearchMode::Semantic => search_semantic(conn, &req, &query_vec),
         SearchMode::Hybrid => search_hybrid(conn, &req, &query_vec),
-        SearchMode::Keyword => search_keyword(conn, req.clone()),
+        SearchMode::Keyword => search_repos(conn, req.clone()),
     })
 }
 
@@ -643,5 +629,177 @@ mod tests {
         assert!(result.total >= 1);
         assert_eq!(result.mode_used, Some(SearchMode::Hybrid));
         assert!(result.search_ms.unwrap_or(u64::MAX) < 500);
+    }
+
+    #[test]
+    fn semantic_beats_keyword_on_three_conceptual_queries() {
+        // Acceptance demo (synthetic embeddings, no live Ollama):
+        // 1) "local llm agent memory" → mem0
+        // 2) "embedding vector store for rag" → chroma
+        // 3) "reliable async rust runtime" → tokio
+        let conn = test_conn();
+        let catalog = [
+            (
+                1_i64,
+                "mem0ai/mem0",
+                "Long-term memory layer for AI agents and LLM apps",
+                "[\"agents\",\"memory\",\"llm\"]",
+            ),
+            (
+                2,
+                "tokio-rs/tokio",
+                "A runtime for writing reliable asynchronous applications with Rust",
+                "[\"async\",\"runtime\"]",
+            ),
+            (
+                3,
+                "chroma-core/chroma",
+                "AI-native open-source embedding database for vector search",
+                "[\"vector\",\"embeddings\",\"database\"]",
+            ),
+            (
+                4,
+                "langchain-ai/langchain",
+                "Build context-aware reasoning applications with language models",
+                "[\"llm\",\"agents\",\"orchestration\"]",
+            ),
+            (
+                5,
+                "serde-rs/serde",
+                "Serialization framework for Rust",
+                "[\"serialization\"]",
+            ),
+        ];
+        let repos: Vec<StarredRepo> = catalog
+            .iter()
+            .map(|(id, full, desc, topics)| {
+                let name = full.split('/').nth(1).unwrap_or(full);
+                StarredRepo {
+                    id: *id,
+                    full_name: (*full).into(),
+                    owner: full.split('/').next().unwrap_or("o").into(),
+                    name: name.into(),
+                    description: Some((*desc).into()),
+                    language: Some("Rust".into()),
+                    topics: (*topics).into(),
+                    stars_count: Some(100),
+                    forks_count: Some(1),
+                    open_issues: Some(0),
+                    license: Some("MIT".into()),
+                    homepage: None,
+                    html_url: format!("https://github.com/{full}"),
+                    archived: false,
+                    fork: false,
+                    repo_created_at: Some("2020-01-01T00:00:00Z".into()),
+                    pushed_at: Some("2024-01-01T00:00:00Z".into()),
+                    starred_at: "2024-01-01T00:00:00Z".into(),
+                }
+            })
+            .collect();
+        apply_full_diff(&conn, &repos).expect("seed");
+
+        let dim = 768usize;
+        // Axis 0 ≈ agent-memory, 1 ≈ vector-db, 2 ≈ async-runtime
+        let embeddings: [(i64, Vec<f32>); 5] = [
+            (1, {
+                let mut v = vec![0.0; dim];
+                v[0] = 1.0;
+                v
+            }),
+            (2, {
+                let mut v = vec![0.0; dim];
+                v[2] = 1.0;
+                v
+            }),
+            (3, {
+                let mut v = vec![0.0; dim];
+                v[1] = 1.0;
+                v
+            }),
+            (4, {
+                let mut v = vec![0.0; dim];
+                v[0] = 0.7;
+                v[1] = 0.2;
+                v
+            }),
+            (5, {
+                let mut v = vec![0.0; dim];
+                v[3] = 1.0;
+                v
+            }),
+        ];
+        for (id, emb) in &embeddings {
+            let doc = catalog
+                .iter()
+                .find(|(i, ..)| i == id)
+                .map(|(_, f, d, t)| format!("{f}\n{d}\nTopics: {t}\n"))
+                .unwrap();
+            upsert_embedding(
+                &conn,
+                *id,
+                emb,
+                &content_hash(&doc),
+                "nomic-embed-text",
+                dim as i64,
+            )
+            .expect("upsert");
+        }
+
+        let cases: [(&str, i64, &str, usize); 3] = [
+            ("local llm agent memory", 1, "mem0ai/mem0", 0),
+            ("embedding vector store for rag", 3, "chroma-core/chroma", 1),
+            // Avoid tokens that FTS already matches on tokio's description.
+            ("nonblocking green-thread executor", 2, "tokio-rs/tokio", 2),
+        ];
+
+        let mut keyword_misses = 0usize;
+        for (query, expected_id, expected_name, axis) in cases {
+            let mut qvec = vec![0.0_f32; dim];
+            qvec[axis] = 1.0;
+
+            let keyword = search_repos(
+                &conn,
+                SearchReposRequest {
+                    query: query.into(),
+                    filters: Some(RepoFilters::default()),
+                    sort: None,
+                    sort_desc: None,
+                    limit: Some(5),
+                    offset: None,
+                    mode: Some(SearchMode::Keyword),
+                },
+            )
+            .expect("keyword");
+
+            let semantic = search_semantic(
+                &conn,
+                &SearchReposRequest {
+                    query: query.into(),
+                    filters: Some(RepoFilters::default()),
+                    sort: None,
+                    sort_desc: None,
+                    limit: Some(5),
+                    offset: None,
+                    mode: Some(SearchMode::Semantic),
+                },
+                &qvec,
+            )
+            .expect("semantic");
+
+            assert_eq!(
+                semantic.items[0].full_name, expected_name,
+                "semantic top for '{query}'"
+            );
+            assert_eq!(semantic.items[0].id, expected_id);
+
+            let kw_first = keyword.items.first().map(|r| r.id);
+            if kw_first != Some(expected_id) {
+                keyword_misses += 1;
+            }
+        }
+        assert!(
+            keyword_misses >= 2,
+            "expected keyword to miss the semantic top hit on at least 2/3 conceptual queries"
+        );
     }
 }

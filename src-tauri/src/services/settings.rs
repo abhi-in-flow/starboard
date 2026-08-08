@@ -89,7 +89,7 @@ pub fn update_settings(conn: &Connection, req: UpdateSettingsRequest) -> AppResu
         set_value(conn, KEY_OLLAMA_EMBED_MODEL, trimmed)?;
     }
     if let Some(dimension) = req.embed_dimension {
-        if dimension < 1 || dimension > 8192 {
+        if !(1..=8192).contains(&dimension) {
             return Err(AppError::settings(format!(
                 "embed_dimension out of range: {dimension}"
             )));

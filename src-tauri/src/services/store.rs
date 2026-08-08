@@ -21,10 +21,14 @@ pub fn register_sqlite_vec() {
     ONCE.call_once(|| {
         // SAFETY: sqlite3_vec_init matches the SQLite auto-extension callback ABI.
         // Transmute is the documented integration path for the sqlite-vec crate.
+        type SqliteAutoExt = unsafe extern "C" fn(
+            *mut rusqlite::ffi::sqlite3,
+            *mut *mut std::os::raw::c_char,
+            *const rusqlite::ffi::sqlite3_api_routines,
+        ) -> std::os::raw::c_int;
         unsafe {
-            rusqlite::ffi::sqlite3_auto_extension(Some(std::mem::transmute(
-                sqlite_vec::sqlite3_vec_init as *const (),
-            )));
+            let init: SqliteAutoExt = std::mem::transmute(sqlite_vec::sqlite3_vec_init as *const ());
+            rusqlite::ffi::sqlite3_auto_extension(Some(init));
         }
     });
 }
@@ -79,7 +83,7 @@ pub fn ensure_embeddings_table(conn: &Connection) -> AppResult<()> {
 
 /// Drop and recreate the vec0 table for a new dimension; clears embedding meta.
 pub fn rebuild_embeddings_table(conn: &Connection, dimension: i64) -> AppResult<()> {
-    if dimension < 1 || dimension > 8192 {
+    if !(1..=8192).contains(&dimension) {
         return Err(AppError::settings(format!(
             "embed_dimension out of range: {dimension}"
         )));

@@ -127,7 +127,6 @@ export function LibraryToolbar({ searchRef, total, searchHint }: Props) {
   const coverage = embedStatus.data?.coverage ?? 0;
   const needEmbeddings =
     (embedStatus.data?.staleOrMissing ?? 0) > 0 || coverage < 0.9;
-  const semanticDisabled = offline || (embedStatus.data?.totalRepos ?? 0) === 0;
   const hasChips = language != null || topic != null || categoryId != null;
 
   const coverageHint =
@@ -152,14 +151,9 @@ export function LibraryToolbar({ searchRef, total, searchHint }: Props) {
             /
           </kbd>
         </div>
-        <div
-          className="flex items-center rounded-lg border border-border p-0.5"
-          role="group"
-          aria-label="Search mode"
-        >
+        <div className="flex items-center rounded-lg border border-border p-0.5">
           {MODES.map((m) => {
-            const disabled =
-              m.id !== "keyword" && (offline || semanticDisabled);
+            const disabled = m.id !== "keyword" && offline;
             return (
               <Button
                 key={m.id}
@@ -169,11 +163,7 @@ export function LibraryToolbar({ searchRef, total, searchHint }: Props) {
                 className="h-8 px-2.5 text-xs"
                 disabled={disabled}
                 title={
-                  offline && m.id !== "keyword"
-                    ? "Ollama offline"
-                    : semanticDisabled && m.id !== "keyword"
-                      ? "Build embeddings first"
-                      : undefined
+                  offline && m.id !== "keyword" ? "Ollama offline" : undefined
                 }
                 onClick={() => setSearchMode(m.id)}
               >
@@ -223,7 +213,9 @@ export function LibraryToolbar({ searchRef, total, searchHint }: Props) {
       {(coverageHint || searchHint || offline || needEmbeddings) && (
         <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
           {offline ? (
-            <span>Ollama offline — Semantic/Hybrid disabled. Keyword still works.</span>
+            <span>
+              Ollama offline — Semantic/Hybrid disabled. Keyword still works.
+            </span>
           ) : null}
           {coverageHint ? <span>{coverageHint}</span> : null}
           {searchHint ? <span>{searchHint}</span> : null}
