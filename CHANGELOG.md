@@ -2,9 +2,10 @@
 
 ## 0.5.0 — Phase 4
 
-- sqlite-vec embeddings (`repo_embeddings` + content-hash staleness) via Ollama `/api/embed`, with `embed://progress` and Build embeddings.
-- Hybrid search: FTS5 ∪ KNN merged with Reciprocal Rank Fusion; Keyword | Semantic | Hybrid toggle (defaults to Hybrid at ≥90% coverage).
-- Graceful Keyword fallback when Ollama is offline or embeddings are missing; embed dimension rebuild path in Settings.
+- sqlite-vec embeddings via Ollama `/api/embed` (content-hash staleness, `embed://progress`, Build embeddings).
+- Auto-embed on launch and after sync once the README queue drains (silent when Ollama is offline).
+- Hybrid search with RRF; Keyword | Semantic | Hybrid toggle (Hybrid default at ≥90% coverage).
+- Graceful Keyword fallback when Ollama is offline or embeddings are missing; embed-dimension rebuild in Settings.
 
 ## 0.4.0 — Phase 3 (thinner cut)
 

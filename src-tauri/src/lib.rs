@@ -23,6 +23,8 @@ pub fn run() {
             app.manage(CategorizeState::default());
             app.manage(EmbedState::default());
             // Resume unfinished README work from a previous session.
+            // When the README queue is empty or finishes, it also kicks silent
+            // auto-embed for stale/missing rows (see spawn_readme_queue_if_needed).
             services::sync::spawn_readme_queue_if_needed(app.handle().clone());
             Ok(())
         })

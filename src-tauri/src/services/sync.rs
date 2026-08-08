@@ -179,12 +179,21 @@ async fn run_sync_inner(app: &AppHandle, full: bool) -> AppResult<SyncResult> {
 }
 
 /// Start the README queue if there is pending work and no queue is already running.
+///
+/// README-then-embed ordering: repo embed documents include `readme_excerpt`, which this
+/// queue fills after sync. Embedding first would immediately stale those rows. So we:
+/// - if no READMEs pending → kick `embed::spawn_embed_pipeline_if_needed` now;
+/// - if READMEs pending → run the queue, then kick auto-embed when it drains successfully.
+///
+/// Launch (`lib.rs` setup) and post-sync both enter through this function, so one hook covers
+/// both. Auto-embed is a silent no-op when Ollama is offline or nothing is stale.
 pub fn spawn_readme_queue_if_needed(app: AppHandle) {
     let pending = match with_db(&app, count_pending_readmes) {
         Ok(n) => n,
         Err(_) => return,
     };
     if pending == 0 {
+        crate::services::embed::spawn_embed_pipeline_if_needed(app);
         return;
     }
 
@@ -201,7 +210,9 @@ pub fn spawn_readme_queue_if_needed(app: AppHandle) {
         // Clears readme_running even if the task panics.
         let _guard = ReadmeRunningGuard(app.clone());
         match run_readme_queue_task(app.clone()).await {
-            Ok(_) => {}
+            Ok(_) => {
+                crate::services::embed::spawn_embed_pipeline_if_needed(app.clone());
+            }
             Err(e) => {
                 emit_progress(
                     &app,

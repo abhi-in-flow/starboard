@@ -197,6 +197,95 @@ pub fn upsert_embedding(
     Ok(())
 }
 
+/// Pure trigger gate for launch / post-README auto-embed.
+/// Pending = `list_stale_or_missing` length; Ollama reachability from a short health check.
+pub fn should_attempt_auto_embed(pending_count: usize, ollama_available: bool) -> bool {
+    pending_count > 0 && ollama_available
+}
+
+/// Short, non-fatal Ollama probe for auto-embed triggers. Never errors — unreachable ⇒ false.
+pub async fn is_ollama_reachable_for_embed(settings: &crate::models::AppSettings) -> bool {
+    match OllamaClient::for_embeddings(settings) {
+        Ok(client) => client
+            .health_check()
+            .await
+            .map(|s| s.available)
+            .unwrap_or(false),
+        Err(_) => false,
+    }
+}
+
+/// Background auto-embed: if anything is stale/missing and Ollama is up, run the pipeline.
+/// Silent no-op when offline, nothing pending, rebuild required, or already running.
+///
+/// Prefer calling this after the README queue drains (documents include `readme_excerpt`);
+/// `sync::spawn_readme_queue_if_needed` is the post-sync / launch hook that does so.
+pub fn spawn_embed_pipeline_if_needed(app: AppHandle) {
+    let pending = match with_db(&app, |conn| Ok(list_stale_or_missing(conn)?.len())) {
+        Ok(n) => n,
+        Err(_) => return,
+    };
+    if pending == 0 {
+        return;
+    }
+    let need_rebuild = match with_db(&app, settings::get_settings) {
+        Ok(s) => s.embeddings_need_rebuild,
+        Err(_) => return,
+    };
+    if need_rebuild {
+        return;
+    }
+    let embed_state = app.state::<EmbedState>();
+    if embed_state.running.load(Ordering::SeqCst) {
+        return;
+    }
+
+    tauri::async_runtime::spawn(async move {
+        let settings = match with_db(&app, settings::get_settings) {
+            Ok(s) => s,
+            Err(_) => return,
+        };
+        let reachable = is_ollama_reachable_for_embed(&settings).await;
+        // Re-count after the health probe — README workers may still be writing excerpts.
+        let pending = match with_db(&app, |conn| Ok(list_stale_or_missing(conn)?.len())) {
+            Ok(n) => n,
+            Err(_) => return,
+        };
+        if !should_attempt_auto_embed(pending, reachable) {
+            return;
+        }
+        let _ = run_embed_pipeline(app).await;
+    });
+}
+
+/// Testable auto-embed pass (no AppHandle): embeds only stale/missing when Ollama is reachable.
+/// Returns the number of repos embedded (0 = silent skip).
+#[cfg(test)]
+pub async fn auto_embed_stale_if_reachable(conn: &Connection) -> AppResult<usize> {
+    let settings = settings::get_settings(conn)?;
+    if settings.embeddings_need_rebuild {
+        return Ok(0);
+    }
+    let pending = list_stale_or_missing(conn)?;
+    let reachable = is_ollama_reachable_for_embed(&settings).await;
+    if !should_attempt_auto_embed(pending.len(), reachable) {
+        return Ok(0);
+    }
+    let client = OllamaClient::for_embeddings(&settings)?;
+    let dimension = settings.embed_dimension;
+    let model = settings.ollama_embed_model.as_str();
+    let mut updated = 0usize;
+    for chunk in pending.chunks(EMBED_BATCH_SIZE) {
+        let inputs: Vec<String> = chunk.iter().map(|d| d.document.clone()).collect();
+        let vectors = client.embed(&inputs).await?;
+        for (doc, embedding) in chunk.iter().zip(vectors.iter()) {
+            upsert_embedding(conn, doc.repo_id, embedding, &doc.content_hash, model, dimension)?;
+            updated += 1;
+        }
+    }
+    Ok(updated)
+}
+
 fn with_db<T, F>(app: &AppHandle, f: F) -> AppResult<T>
 where
     F: FnOnce(&Connection) -> AppResult<T>,
@@ -553,5 +642,143 @@ mod tests {
         let again = list_stale_or_missing(&conn).expect("again");
         assert_eq!(again.len(), 1);
         assert_eq!(again[0].repo_id, 10);
+    }
+
+    #[test]
+    fn should_attempt_auto_embed_requires_pending_and_ollama() {
+        assert!(!should_attempt_auto_embed(0, true));
+        assert!(!should_attempt_auto_embed(3, false));
+        assert!(!should_attempt_auto_embed(0, false));
+        assert!(should_attempt_auto_embed(1, true));
+        assert!(should_attempt_auto_embed(50, true));
+    }
+
+    #[tokio::test]
+    async fn auto_embed_post_sync_embeds_only_stale_when_ollama_up() {
+        let server = MockServer::start().await;
+        let emb_fresh: Vec<f32> = (0..768).map(|i| (i as f32) * 0.001).collect();
+        let emb_stale: Vec<f32> = (0..768).map(|i| 0.5 + (i as f32) * 0.0001).collect();
+
+        Mock::given(method("GET"))
+            .and(path("/api/tags"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(serde_json::json!({ "models": [] })),
+            )
+            .mount(&server)
+            .await;
+        // First call embeds both; second call (after one goes stale) embeds one.
+        Mock::given(method("POST"))
+            .and(path("/api/embed"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "model": "nomic-embed-text",
+                "embeddings": [emb_fresh.clone(), emb_stale.clone()]
+            })))
+            .up_to_n_times(1)
+            .expect(1)
+            .mount(&server)
+            .await;
+        Mock::given(method("POST"))
+            .and(path("/api/embed"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "model": "nomic-embed-text",
+                "embeddings": [emb_stale]
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let conn = test_conn();
+        // Simulate post-sync library with two new repos (all missing embeddings).
+        apply_full_diff(
+            &conn,
+            &[
+                sample(20, "new-a", "first sync add"),
+                sample(21, "new-b", "first sync add"),
+            ],
+        )
+        .expect("seed");
+        settings::update_settings(
+            &conn,
+            crate::models::UpdateSettingsRequest {
+                ollama_base_url: Some(server.uri()),
+                ollama_chat_model: None,
+                ollama_embed_model: Some("nomic-embed-text".into()),
+                embed_dimension: None,
+            },
+        )
+        .expect("settings");
+
+        assert!(is_ollama_reachable_for_embed(
+            &settings::get_settings(&conn).expect("settings")
+        )
+        .await);
+        let n = auto_embed_stale_if_reachable(&conn)
+            .await
+            .expect("auto embed");
+        assert_eq!(n, 2);
+        assert!(list_stale_or_missing(&conn).expect("none").is_empty());
+
+        // Post-sync description change → only that repo re-embeds.
+        conn.execute(
+            "UPDATE repos SET description = 'updated after sync' WHERE id = 20",
+            [],
+        )
+        .expect("update");
+        let stale = list_stale_or_missing(&conn).expect("stale");
+        assert_eq!(stale.len(), 1);
+        assert_eq!(stale[0].repo_id, 20);
+
+        let n2 = auto_embed_stale_if_reachable(&conn)
+            .await
+            .expect("re-embed stale");
+        assert_eq!(n2, 1);
+        assert!(list_stale_or_missing(&conn).expect("caught up").is_empty());
+    }
+
+    #[tokio::test]
+    async fn auto_embed_noop_when_ollama_unreachable() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/api/tags"))
+            .respond_with(ResponseTemplate::new(503))
+            .mount(&server)
+            .await;
+        // Must never hit /api/embed when health fails.
+        Mock::given(method("POST"))
+            .and(path("/api/embed"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "embeddings": []
+            })))
+            .expect(0)
+            .mount(&server)
+            .await;
+
+        let conn = test_conn();
+        apply_full_diff(&conn, &[sample(30, "lonely", "needs embed")]).expect("seed");
+        settings::update_settings(
+            &conn,
+            crate::models::UpdateSettingsRequest {
+                ollama_base_url: Some(server.uri()),
+                ollama_chat_model: None,
+                ollama_embed_model: Some("nomic-embed-text".into()),
+                embed_dimension: None,
+            },
+        )
+        .expect("settings");
+
+        let settings = settings::get_settings(&conn).expect("get");
+        assert!(!is_ollama_reachable_for_embed(&settings).await);
+        let pending = list_stale_or_missing(&conn).expect("pending").len();
+        assert!(pending > 0);
+        assert!(!should_attempt_auto_embed(
+            pending,
+            is_ollama_reachable_for_embed(&settings).await
+        ));
+
+        let n = auto_embed_stale_if_reachable(&conn)
+            .await
+            .expect("silent skip");
+        assert_eq!(n, 0);
+        assert_eq!(list_stale_or_missing(&conn).expect("still pending").len(), 1);
     }
 }
