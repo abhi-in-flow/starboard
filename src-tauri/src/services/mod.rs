@@ -3,6 +3,7 @@ pub mod categorizer;
 pub mod embed;
 pub mod github;
 pub mod github_auth;
+pub mod insights;
 pub mod logging;
 pub mod ollama;
 pub mod repos;
