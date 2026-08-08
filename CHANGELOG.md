@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.6.0 — Phase 5
+
+- Insights dashboard: starring timeline, local-TZ rhythm heatmap, interest drift (with subcategory drill-down), language trend, Rising/Dormant/Steady metrics, and fun facts.
+- Global date-range filter (all-time / 1y / 6m / custom) applied across all six views; graceful short-history empty states.
+- Export categorized library as Markdown or JSON via native save dialog.
+
 ## 0.5.0 — Phase 4
 
 - sqlite-vec embeddings via Ollama `/api/embed` (content-hash staleness, `embed://progress`, Build embeddings).
