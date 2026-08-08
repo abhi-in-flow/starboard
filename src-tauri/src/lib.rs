@@ -5,8 +5,9 @@ mod services;
 
 use tauri::Manager;
 
-use commands::{auth, categorize, repos, settings, sync};
+use commands::{auth, categorize, embed, repos, settings, sync};
 use services::categorizer::CategorizeState;
+use services::embed::EmbedState;
 use services::store::{self, DbState};
 use services::sync::SyncState;
 
@@ -20,6 +21,7 @@ pub fn run() {
             app.manage(DbState(std::sync::Mutex::new(conn)));
             app.manage(SyncState::default());
             app.manage(CategorizeState::default());
+            app.manage(EmbedState::default());
             // Resume unfinished README work from a previous session.
             services::sync::spawn_readme_queue_if_needed(app.handle().clone());
             Ok(())
@@ -48,6 +50,8 @@ pub fn run() {
             categorize::get_categorize_status,
             categorize::set_repo_category,
             categorize::recategorize_repo,
+            embed::get_embed_status,
+            embed::start_embedding,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

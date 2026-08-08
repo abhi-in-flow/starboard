@@ -4,6 +4,7 @@ import type {
   AuthStatus,
   CategorizeStatus,
   CategoryNode,
+  EmbedStatus,
   LibraryFacets,
   ListReposRequest,
   OllamaStatus,
@@ -114,4 +115,12 @@ export function setRepoCategory(repoId: number, categoryId: number) {
 
 export function recategorizeRepo(repoId: number) {
   return invoke<void>("recategorize_repo", { repoId });
+}
+
+export function getEmbedStatus() {
+  return invoke<EmbedStatus>("get_embed_status");
+}
+
+export function startEmbedding() {
+  return invoke<void>("start_embedding");
 }
