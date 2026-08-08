@@ -1,5 +1,7 @@
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { listen } from "@tauri-apps/api/event";
 import { LayoutGrid, List, Search, X } from "lucide-react";
+import { useEffect } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -12,19 +14,38 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { getLibraryFacets } from "@/lib/tauri";
+import {
+  getEmbedStatus,
+  getLibraryFacets,
+  getOllamaStatus,
+  startEmbedding,
+} from "@/lib/tauri";
 import { cn } from "@/lib/utils";
 import { useUiStore } from "@/store/ui";
-import type { RepoFilters, RepoSort } from "@/types";
+import type { EmbedProgress, RepoFilters, RepoSort, SearchMode } from "@/types";
 
 type Props = {
   searchRef: React.Ref<HTMLInputElement>;
   total: number;
+  searchHint?: string | null;
 };
 
-export function LibraryToolbar({ searchRef, total }: Props) {
+const MODES: { id: SearchMode; label: string }[] = [
+  { id: "keyword", label: "Keyword" },
+  { id: "semantic", label: "Semantic" },
+  { id: "hybrid", label: "Hybrid" },
+];
+
+export function LibraryToolbar({ searchRef, total, searchHint }: Props) {
+  const queryClient = useQueryClient();
   const query = useUiStore((s) => s.query);
   const setQuery = useUiStore((s) => s.setQuery);
+  const searchMode = useUiStore((s) => s.searchMode);
+  const setSearchMode = useUiStore((s) => s.setSearchMode);
+  const searchModeInitialized = useUiStore((s) => s.searchModeInitialized);
+  const setSearchModeInitialized = useUiStore(
+    (s) => s.setSearchModeInitialized,
+  );
   const sort = useUiStore((s) => s.sort);
   const setSort = useUiStore((s) => s.setSort);
   const layout = useUiStore((s) => s.layout);
@@ -53,7 +74,65 @@ export function LibraryToolbar({ searchRef, total }: Props) {
     queryFn: () => getLibraryFacets(filters),
   });
 
+  const ollama = useQuery({
+    queryKey: ["ollamaStatus"],
+    queryFn: getOllamaStatus,
+    refetchInterval: 15_000,
+  });
+
+  const embedStatus = useQuery({
+    queryKey: ["embedStatus"],
+    queryFn: getEmbedStatus,
+    refetchInterval: (q) => (q.state.data?.running ? 1000 : 10_000),
+  });
+
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    void listen<EmbedProgress>("embed://progress", () => {
+      void queryClient.invalidateQueries({ queryKey: ["embedStatus"] });
+    }).then((fn) => {
+      unlisten = fn;
+    });
+    return () => {
+      unlisten?.();
+    };
+  }, [queryClient]);
+
+  // Default Hybrid when ≥90% of repos are embedded; otherwise Keyword + hint.
+  useEffect(() => {
+    if (searchModeInitialized || !embedStatus.data) {
+      return;
+    }
+    if (embedStatus.data.coverage >= 0.9 && embedStatus.data.totalRepos > 0) {
+      setSearchMode("hybrid");
+    } else {
+      setSearchMode("keyword");
+    }
+    setSearchModeInitialized(true);
+  }, [
+    embedStatus.data,
+    searchModeInitialized,
+    setSearchMode,
+    setSearchModeInitialized,
+  ]);
+
+  const startEmbedMutation = useMutation({
+    mutationFn: startEmbedding,
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["embedStatus"] });
+    },
+  });
+
+  const offline = ollama.data != null && !ollama.data.available;
+  const coverage = embedStatus.data?.coverage ?? 0;
+  const needEmbeddings =
+    (embedStatus.data?.staleOrMissing ?? 0) > 0 || coverage < 0.9;
   const hasChips = language != null || topic != null || categoryId != null;
+
+  const coverageHint =
+    !searchModeInitialized || coverage >= 0.9
+      ? null
+      : `Embeddings at ${Math.round(coverage * 100)}% — defaulting to Keyword until ≥90%.`;
 
   return (
     <div className="flex flex-col gap-3 border-b border-border bg-background/80 px-4 py-3">
@@ -71,6 +150,27 @@ export function LibraryToolbar({ searchRef, total }: Props) {
           <kbd className="pointer-events-none absolute top-1/2 right-3 -translate-y-1/2 rounded border border-border bg-muted px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">
             /
           </kbd>
+        </div>
+        <div className="flex items-center rounded-lg border border-border p-0.5">
+          {MODES.map((m) => {
+            const disabled = m.id !== "keyword" && offline;
+            return (
+              <Button
+                key={m.id}
+                type="button"
+                size="sm"
+                variant={searchMode === m.id ? "secondary" : "ghost"}
+                className="h-8 px-2.5 text-xs"
+                disabled={disabled}
+                title={
+                  offline && m.id !== "keyword" ? "Ollama offline" : undefined
+                }
+                onClick={() => setSearchMode(m.id)}
+              >
+                {m.label}
+              </Button>
+            );
+          })}
         </div>
         <Select value={sort} onValueChange={(v) => setSort(v as RepoSort)}>
           <SelectTrigger className="h-10 w-36">
@@ -109,6 +209,42 @@ export function LibraryToolbar({ searchRef, total }: Props) {
           {total.toLocaleString()} repositories
         </span>
       </div>
+
+      {(coverageHint || searchHint || offline || needEmbeddings) && (
+        <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+          {offline ? (
+            <span>
+              Ollama offline — Semantic/Hybrid disabled. Keyword still works.
+            </span>
+          ) : null}
+          {coverageHint ? <span>{coverageHint}</span> : null}
+          {searchHint ? <span>{searchHint}</span> : null}
+          {needEmbeddings ? (
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              className="h-7 px-2 text-xs"
+              disabled={
+                offline ||
+                embedStatus.data?.running ||
+                startEmbedMutation.isPending ||
+                embedStatus.data?.needRebuild
+              }
+              onClick={() => startEmbedMutation.mutate()}
+            >
+              {embedStatus.data?.running
+                ? `Embedding… ${embedStatus.data.embeddedRepos}/${embedStatus.data.totalRepos}`
+                : "Build embeddings"}
+            </Button>
+          ) : null}
+          {embedStatus.data?.needRebuild ? (
+            <Badge variant="secondary">
+              Dimension changed — rebuild table in Settings
+            </Badge>
+          ) : null}
+        </div>
+      )}
 
       <div className="flex flex-wrap items-center gap-4">
         <div className="flex items-center gap-2 text-sm">

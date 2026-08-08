@@ -6,7 +6,10 @@ pub struct AppSettings {
     pub ollama_base_url: String,
     pub ollama_chat_model: String,
     pub ollama_embed_model: String,
+    pub embed_dimension: i64,
     pub github_username: Option<String>,
+    /// True when settings `embed_dimension` differs from the live vec0 table.
+    pub embeddings_need_rebuild: bool,
 }
 
 impl Default for AppSettings {
@@ -15,7 +18,9 @@ impl Default for AppSettings {
             ollama_base_url: "http://127.0.0.1:11434".to_string(),
             ollama_chat_model: String::new(),
             ollama_embed_model: "nomic-embed-text".to_string(),
+            embed_dimension: 768,
             github_username: None,
+            embeddings_need_rebuild: false,
         }
     }
 }
@@ -33,6 +38,7 @@ pub struct UpdateSettingsRequest {
     pub ollama_base_url: Option<String>,
     pub ollama_chat_model: Option<String>,
     pub ollama_embed_model: Option<String>,
+    pub embed_dimension: Option<i64>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -249,6 +255,15 @@ pub struct ListReposRequest {
     pub offset: Option<i64>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "camelCase")]
+pub enum SearchMode {
+    #[default]
+    Keyword,
+    Semantic,
+    Hybrid,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SearchReposRequest {
@@ -258,6 +273,8 @@ pub struct SearchReposRequest {
     pub sort_desc: Option<bool>,
     pub limit: Option<i64>,
     pub offset: Option<i64>,
+    /// Keyword | Semantic | Hybrid. Defaults to Keyword when omitted (browse-safe).
+    pub mode: Option<SearchMode>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -265,6 +282,15 @@ pub struct SearchReposRequest {
 pub struct RepoListResult {
     pub items: Vec<RepoSummary>,
     pub total: i64,
+    /// Mode actually used (may differ from requested on fallback).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mode_used: Option<SearchMode>,
+    /// User-facing hint when Semantic/Hybrid degraded to Keyword.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hint: Option<String>,
+    /// Hybrid/semantic DB+RRF timing in ms, excluding the query-embedding HTTP call.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub search_ms: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -350,4 +376,30 @@ pub struct CategorizeStatus {
 pub struct AssignRepoCategoryRequest {
     pub repo_id: i64,
     pub category_id: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EmbedProgress {
+    pub kind: String,
+    pub current: u32,
+    pub total: u32,
+    pub message: String,
+    #[serde(default)]
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct EmbedStatus {
+    pub running: bool,
+    pub total_repos: i64,
+    pub embedded_repos: i64,
+    pub stale_or_missing: i64,
+    /// embedded_repos / total_repos, or 0 when empty.
+    pub coverage: f64,
+    pub last_error: Option<String>,
+    pub model: String,
+    pub dimension: i64,
+    pub need_rebuild: bool,
 }

@@ -44,7 +44,13 @@ pub fn list_repos(conn: &Connection, req: ListReposRequest) -> AppResult<RepoLis
         items.push(row?);
     }
 
-    Ok(RepoListResult { items, total })
+    Ok(RepoListResult {
+        items,
+        total,
+        mode_used: None,
+        hint: None,
+        search_ms: None,
+    })
 }
 
 pub fn get_repo(conn: &Connection, id: i64) -> AppResult<RepoDetail> {

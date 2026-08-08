@@ -15,6 +15,7 @@ import {
   disconnectGithub,
   getAuthStatus,
   getSettings,
+  rebuildEmbeddingsTable,
   updateSettings,
 } from "@/lib/tauri";
 import type { AppError } from "@/types";
@@ -37,6 +38,7 @@ export function SettingsView() {
   const [baseUrl, setBaseUrl] = useState("");
   const [chatModel, setChatModel] = useState("");
   const [embedModel, setEmbedModel] = useState("");
+  const [embedDimension, setEmbedDimension] = useState("768");
   const [settingsSaved, setSettingsSaved] = useState(false);
 
   const authQuery = useQuery({
@@ -51,6 +53,7 @@ export function SettingsView() {
       setBaseUrl(settings.ollamaBaseUrl);
       setChatModel(settings.ollamaChatModel);
       setEmbedModel(settings.ollamaEmbedModel);
+      setEmbedDimension(String(settings.embedDimension));
       return settings;
     },
   });
@@ -83,21 +86,40 @@ export function SettingsView() {
   });
 
   const saveSettingsMutation = useMutation({
-    mutationFn: () =>
-      updateSettings({
+    mutationFn: () => {
+      const parsed = Number.parseInt(embedDimension, 10);
+      return updateSettings({
         ollamaBaseUrl: baseUrl,
         ollamaChatModel: chatModel,
         ollamaEmbedModel: embedModel,
-      }),
+        embedDimension: Number.isFinite(parsed) ? parsed : undefined,
+      });
+    },
     onSuccess: (settings) => {
       queryClient.setQueryData(["settings"], settings);
+      setEmbedDimension(String(settings.embedDimension));
       setSettingsSaved(true);
       window.setTimeout(() => setSettingsSaved(false), 2000);
+      void queryClient.invalidateQueries({ queryKey: ["embedStatus"] });
+    },
+  });
+
+  const rebuildMutation = useMutation({
+    mutationFn: () => {
+      const parsed = Number.parseInt(embedDimension, 10);
+      return rebuildEmbeddingsTable(
+        Number.isFinite(parsed) ? parsed : undefined,
+      );
+    },
+    onSuccess: (settings) => {
+      queryClient.setQueryData(["settings"], settings);
+      void queryClient.invalidateQueries({ queryKey: ["embedStatus"] });
     },
   });
 
   const auth = authQuery.data;
   const showPatForm = !auth?.connected || replacingToken;
+  const needRebuild = settingsQuery.data?.embeddingsNeedRebuild === true;
 
   return (
     <div className="mx-auto flex w-full max-w-2xl flex-col gap-6 p-8">
@@ -254,6 +276,46 @@ export function SettingsView() {
                   placeholder="nomic-embed-text"
                 />
               </div>
+              <div className="flex flex-col gap-2">
+                <Label htmlFor="embed-dimension">Embed dimension</Label>
+                <Input
+                  id="embed-dimension"
+                  type="number"
+                  min={1}
+                  max={8192}
+                  value={embedDimension}
+                  onChange={(e) => setEmbedDimension(e.target.value)}
+                  placeholder="768"
+                />
+                <p className="text-xs text-muted-foreground">
+                  Must match the embedding model output size (nomic-embed-text =
+                  768). Changing this requires rebuilding the vector table.
+                </p>
+              </div>
+              {needRebuild ? (
+                <div className="rounded-md border border-border bg-muted/40 p-3 text-sm">
+                  <p className="mb-2">
+                    Embed dimension changed. Rebuild the embeddings table (this
+                    clears existing vectors), then run Build embeddings from the
+                    library.
+                  </p>
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    disabled={rebuildMutation.isPending}
+                    onClick={() => rebuildMutation.mutate()}
+                  >
+                    {rebuildMutation.isPending
+                      ? "Rebuilding…"
+                      : "Rebuild embeddings table"}
+                  </Button>
+                  {rebuildMutation.isError ? (
+                    <p className="mt-2 text-sm text-destructive">
+                      {errorMessage(rebuildMutation.error)}
+                    </p>
+                  ) : null}
+                </div>
+              ) : null}
               <div className="flex items-center gap-3">
                 <Button type="submit" disabled={saveSettingsMutation.isPending}>
                   {saveSettingsMutation.isPending ? "Saving…" : "Save settings"}

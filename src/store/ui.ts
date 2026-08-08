@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { RepoSort } from "@/types";
+import type { RepoSort, SearchMode } from "@/types";
 
 export type AppView = "library" | "categories" | "insights" | "settings";
 export type LibraryLayout = "list" | "grid";
@@ -13,6 +13,11 @@ type UiState = {
 
   query: string;
   setQuery: (query: string) => void;
+
+  searchMode: SearchMode;
+  setSearchMode: (mode: SearchMode) => void;
+  searchModeInitialized: boolean;
+  setSearchModeInitialized: (v: boolean) => void;
 
   sort: RepoSort;
   sortDesc: boolean;
@@ -45,6 +50,12 @@ export const useUiStore = create<UiState>((set) => ({
 
   query: "",
   setQuery: (query) => set({ query }),
+
+  searchMode: "keyword",
+  setSearchMode: (searchMode) => set({ searchMode }),
+  searchModeInitialized: false,
+  setSearchModeInitialized: (searchModeInitialized) =>
+    set({ searchModeInitialized }),
 
   sort: "starredAt",
   sortDesc: true,

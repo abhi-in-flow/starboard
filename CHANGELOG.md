@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.5.0 — Phase 4
+
+- sqlite-vec embeddings via Ollama `/api/embed` (content-hash staleness, `embed://progress`, Build embeddings).
+- Auto-embed on launch and after sync once the README queue drains (silent when Ollama is offline).
+- Hybrid search with RRF; Keyword | Semantic | Hybrid toggle (Hybrid default at ≥90% coverage).
+- Graceful Keyword fallback when Ollama is offline or embeddings are missing; embed-dimension rebuild in Settings.
+
 ## 0.4.0 — Phase 3 (thinner cut)
 
 - Categories menu: generate taxonomy via Ollama, edit draft, commit (force replace clears assignments).

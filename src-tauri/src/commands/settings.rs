@@ -17,3 +17,17 @@ pub fn update_settings(
 ) -> AppResult<AppSettings> {
     store::with_conn(&state, |conn| settings::update_settings(conn, request))
 }
+
+#[tauri::command]
+pub fn rebuild_embeddings_table(
+    state: State<'_, DbState>,
+    dimension: Option<i64>,
+) -> AppResult<AppSettings> {
+    store::with_conn(&state, |conn| {
+        let dim = match dimension {
+            Some(d) => d,
+            None => settings::get_embed_dimension(conn)?,
+        };
+        settings::apply_embed_dimension_rebuild(conn, dim)
+    })
+}

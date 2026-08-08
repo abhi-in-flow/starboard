@@ -1,12 +1,12 @@
-use tauri::State;
+use tauri::{AppHandle, State};
 
 use crate::error::AppResult;
 use crate::models::{
-    LibraryFacets, ListReposRequest, RepoDetail, RepoFilters, RepoListResult, SearchReposRequest,
+    CategoryNode, LibraryFacets, ListReposRequest, RepoDetail, RepoFilters, RepoListResult,
+    SearchReposRequest,
 };
 use crate::services::{categories, repos, search};
 use crate::services::store::{self, DbState};
-use crate::models::CategoryNode;
 
 #[tauri::command]
 pub fn list_repos(
@@ -17,11 +17,11 @@ pub fn list_repos(
 }
 
 #[tauri::command]
-pub fn search_repos(
-    state: State<'_, DbState>,
+pub async fn search_repos(
+    app: AppHandle,
     request: SearchReposRequest,
 ) -> AppResult<RepoListResult> {
-    store::with_conn(&state, |conn| search::search_repos(conn, request))
+    search::search_repos_async(&app, request).await
 }
 
 #[tauri::command]

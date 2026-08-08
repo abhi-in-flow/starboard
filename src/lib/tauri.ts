@@ -4,6 +4,7 @@ import type {
   AuthStatus,
   CategorizeStatus,
   CategoryNode,
+  EmbedStatus,
   LibraryFacets,
   ListReposRequest,
   OllamaStatus,
@@ -24,6 +25,12 @@ export function getSettings() {
 
 export function updateSettings(request: UpdateSettingsRequest) {
   return invoke<AppSettings>("update_settings", { request });
+}
+
+export function rebuildEmbeddingsTable(dimension?: number) {
+  return invoke<AppSettings>("rebuild_embeddings_table", {
+    dimension: dimension ?? null,
+  });
 }
 
 export function getAuthStatus() {
@@ -108,4 +115,12 @@ export function setRepoCategory(repoId: number, categoryId: number) {
 
 export function recategorizeRepo(repoId: number) {
   return invoke<void>("recategorize_repo", { repoId });
+}
+
+export function getEmbedStatus() {
+  return invoke<EmbedStatus>("get_embed_status");
+}
+
+export function startEmbedding() {
+  return invoke<void>("start_embedding");
 }

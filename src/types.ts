@@ -4,7 +4,9 @@ export type AppSettings = {
   ollamaBaseUrl: string;
   ollamaChatModel: string;
   ollamaEmbedModel: string;
+  embedDimension: number;
   githubUsername: string | null;
+  embeddingsNeedRebuild: boolean;
 };
 
 export type AuthStatus = {
@@ -16,6 +18,7 @@ export type UpdateSettingsRequest = {
   ollamaBaseUrl?: string;
   ollamaChatModel?: string;
   ollamaEmbedModel?: string;
+  embedDimension?: number;
 };
 
 export type AppError = {
@@ -100,11 +103,6 @@ export type RepoDetail = {
   categorySource: string | null;
 };
 
-export type RepoListResult = {
-  items: RepoSummary[];
-  total: number;
-};
-
 export type FacetCount = {
   name: string;
   count: number;
@@ -131,6 +129,8 @@ export type ListReposRequest = {
   offset?: number;
 };
 
+export type SearchMode = "keyword" | "semantic" | "hybrid";
+
 export type SearchReposRequest = {
   query: string;
   filters?: RepoFilters;
@@ -138,6 +138,15 @@ export type SearchReposRequest = {
   sortDesc?: boolean;
   limit?: number;
   offset?: number;
+  mode?: SearchMode;
+};
+
+export type RepoListResult = {
+  items: RepoSummary[];
+  total: number;
+  modeUsed?: SearchMode;
+  hint?: string | null;
+  searchMs?: number | null;
 };
 
 export type OllamaStatus = {
@@ -180,4 +189,24 @@ export type CategorizeStatus = {
 export type AssignRepoCategoryRequest = {
   repoId: number;
   categoryId: number;
+};
+
+export type EmbedProgress = {
+  kind: string;
+  current: number;
+  total: number;
+  message: string;
+  error?: string | null;
+};
+
+export type EmbedStatus = {
+  running: boolean;
+  totalRepos: number;
+  embeddedRepos: number;
+  staleOrMissing: number;
+  coverage: number;
+  lastError: string | null;
+  model: string;
+  dimension: number;
+  needRebuild: boolean;
 };

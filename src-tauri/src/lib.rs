@@ -5,8 +5,9 @@ mod services;
 
 use tauri::Manager;
 
-use commands::{auth, categorize, repos, settings, sync};
+use commands::{auth, categorize, embed, repos, settings, sync};
 use services::categorizer::CategorizeState;
+use services::embed::EmbedState;
 use services::store::{self, DbState};
 use services::sync::SyncState;
 
@@ -20,13 +21,17 @@ pub fn run() {
             app.manage(DbState(std::sync::Mutex::new(conn)));
             app.manage(SyncState::default());
             app.manage(CategorizeState::default());
+            app.manage(EmbedState::default());
             // Resume unfinished README work from a previous session.
+            // When the README queue is empty or finishes, it also kicks silent
+            // auto-embed for stale/missing rows (see spawn_readme_queue_if_needed).
             services::sync::spawn_readme_queue_if_needed(app.handle().clone());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
             settings::get_settings,
             settings::update_settings,
+            settings::rebuild_embeddings_table,
             auth::get_auth_status,
             auth::connect_github,
             auth::disconnect_github,
@@ -47,6 +52,8 @@ pub fn run() {
             categorize::get_categorize_status,
             categorize::set_repo_category,
             categorize::recategorize_repo,
+            embed::get_embed_status,
+            embed::start_embedding,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

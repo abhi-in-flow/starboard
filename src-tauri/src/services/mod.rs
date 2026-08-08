@@ -1,5 +1,6 @@
 pub mod categories;
 pub mod categorizer;
+pub mod embed;
 pub mod github;
 pub mod github_auth;
 pub mod logging;
