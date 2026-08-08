@@ -27,6 +27,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             settings::get_settings,
             settings::update_settings,
+            settings::rebuild_embeddings_table,
             auth::get_auth_status,
             auth::connect_github,
             auth::disconnect_github,

@@ -4,7 +4,9 @@ export type AppSettings = {
   ollamaBaseUrl: string;
   ollamaChatModel: string;
   ollamaEmbedModel: string;
+  embedDimension: number;
   githubUsername: string | null;
+  embeddingsNeedRebuild: boolean;
 };
 
 export type AuthStatus = {
@@ -16,6 +18,7 @@ export type UpdateSettingsRequest = {
   ollamaBaseUrl?: string;
   ollamaChatModel?: string;
   ollamaEmbedModel?: string;
+  embedDimension?: number;
 };
 
 export type AppError = {

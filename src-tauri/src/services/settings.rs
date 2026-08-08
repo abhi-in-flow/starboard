@@ -2,6 +2,7 @@ use rusqlite::Connection;
 
 use crate::error::{AppError, AppResult};
 use crate::models::{AppSettings, UpdateSettingsRequest};
+use crate::services::store::{self, DEFAULT_EMBED_DIMENSION};
 
 const KEY_OLLAMA_BASE_URL: &str = "ollama_base_url";
 const KEY_OLLAMA_CHAT_MODEL: &str = "ollama_chat_model";
@@ -9,6 +10,9 @@ const KEY_OLLAMA_EMBED_MODEL: &str = "ollama_embed_model";
 const KEY_GITHUB_USERNAME: &str = "github_username";
 pub const KEY_STARRED_ETAG: &str = "starred_etag";
 pub const KEY_LAST_SYNCED_AT: &str = "last_synced_at";
+pub const KEY_EMBED_DIMENSION: &str = "embed_dimension";
+/// Dimension the live `repo_embeddings` vec0 table was created with.
+pub const KEY_EMBEDDINGS_TABLE_DIMENSION: &str = "embeddings_table_dimension";
 
 pub fn get_settings(conn: &Connection) -> AppResult<AppSettings> {
     let defaults = AppSettings::default();
@@ -19,8 +23,51 @@ pub fn get_settings(conn: &Connection) -> AppResult<AppSettings> {
             .unwrap_or(defaults.ollama_chat_model),
         ollama_embed_model: get_value(conn, KEY_OLLAMA_EMBED_MODEL)?
             .unwrap_or(defaults.ollama_embed_model),
+        embed_dimension: get_embed_dimension(conn)?,
         github_username: get_value(conn, KEY_GITHUB_USERNAME)?,
+        embeddings_need_rebuild: embeddings_need_rebuild(conn)?,
     })
+}
+
+pub fn get_embed_dimension(conn: &Connection) -> AppResult<i64> {
+    match get_value(conn, KEY_EMBED_DIMENSION)? {
+        Some(raw) => raw
+            .parse::<i64>()
+            .map_err(|_| AppError::settings(format!("invalid embed_dimension: {raw}"))),
+        None => Ok(DEFAULT_EMBED_DIMENSION),
+    }
+}
+
+pub fn get_embeddings_table_dimension(conn: &Connection) -> AppResult<Option<i64>> {
+    match get_value(conn, KEY_EMBEDDINGS_TABLE_DIMENSION)? {
+        Some(raw) => {
+            let parsed = raw
+                .parse::<i64>()
+                .map_err(|_| AppError::settings(format!("invalid embeddings_table_dimension: {raw}")))?;
+            Ok(Some(parsed))
+        }
+        None => {
+            // Migration 002 creates float[768]; treat missing key as that default when table exists.
+            let exists: bool = conn.query_row(
+                "SELECT COUNT(*) > 0 FROM sqlite_master WHERE type = 'table' AND name = 'repo_embeddings'",
+                [],
+                |row| row.get(0),
+            )?;
+            if exists {
+                Ok(Some(DEFAULT_EMBED_DIMENSION))
+            } else {
+                Ok(None)
+            }
+        }
+    }
+}
+
+pub fn embeddings_need_rebuild(conn: &Connection) -> AppResult<bool> {
+    let wanted = get_embed_dimension(conn)?;
+    match get_embeddings_table_dimension(conn)? {
+        Some(have) => Ok(have != wanted),
+        None => Ok(true),
+    }
 }
 
 pub fn update_settings(conn: &Connection, req: UpdateSettingsRequest) -> AppResult<AppSettings> {
@@ -41,6 +88,20 @@ pub fn update_settings(conn: &Connection, req: UpdateSettingsRequest) -> AppResu
         }
         set_value(conn, KEY_OLLAMA_EMBED_MODEL, trimmed)?;
     }
+    if let Some(dimension) = req.embed_dimension {
+        if dimension < 1 || dimension > 8192 {
+            return Err(AppError::settings(format!(
+                "embed_dimension out of range: {dimension}"
+            )));
+        }
+        set_value(conn, KEY_EMBED_DIMENSION, &dimension.to_string())?;
+    }
+    get_settings(conn)
+}
+
+/// Persist a new embed dimension and rebuild the vec0 table (clears embeddings).
+pub fn apply_embed_dimension_rebuild(conn: &Connection, dimension: i64) -> AppResult<AppSettings> {
+    store::rebuild_embeddings_table(conn, dimension)?;
     get_settings(conn)
 }
 
@@ -96,6 +157,8 @@ mod tests {
         let settings = get_settings(&conn).expect("get");
         assert_eq!(settings.ollama_base_url, "http://127.0.0.1:11434");
         assert_eq!(settings.ollama_embed_model, "nomic-embed-text");
+        assert_eq!(settings.embed_dimension, 768);
+        assert!(!settings.embeddings_need_rebuild);
         assert!(settings.github_username.is_none());
 
         let updated = update_settings(
@@ -104,6 +167,7 @@ mod tests {
                 ollama_base_url: Some("http://192.168.1.10:11434".into()),
                 ollama_chat_model: Some("qwen3:14b".into()),
                 ollama_embed_model: None,
+                embed_dimension: Some(1024),
             },
         )
         .expect("update");
@@ -111,5 +175,27 @@ mod tests {
         assert_eq!(updated.ollama_base_url, "http://192.168.1.10:11434");
         assert_eq!(updated.ollama_chat_model, "qwen3:14b");
         assert_eq!(updated.ollama_embed_model, "nomic-embed-text");
+        assert_eq!(updated.embed_dimension, 1024);
+        assert!(updated.embeddings_need_rebuild);
+    }
+
+    #[test]
+    fn apply_embed_dimension_rebuild_clears_need_flag() {
+        let conn = test_conn();
+        update_settings(
+            &conn,
+            UpdateSettingsRequest {
+                ollama_base_url: None,
+                ollama_chat_model: None,
+                ollama_embed_model: None,
+                embed_dimension: Some(384),
+            },
+        )
+        .expect("update");
+        assert!(get_settings(&conn).expect("get").embeddings_need_rebuild);
+
+        let after = apply_embed_dimension_rebuild(&conn, 384).expect("rebuild");
+        assert_eq!(after.embed_dimension, 384);
+        assert!(!after.embeddings_need_rebuild);
     }
 }

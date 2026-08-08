@@ -6,7 +6,10 @@ pub struct AppSettings {
     pub ollama_base_url: String,
     pub ollama_chat_model: String,
     pub ollama_embed_model: String,
+    pub embed_dimension: i64,
     pub github_username: Option<String>,
+    /// True when settings `embed_dimension` differs from the live vec0 table.
+    pub embeddings_need_rebuild: bool,
 }
 
 impl Default for AppSettings {
@@ -15,7 +18,9 @@ impl Default for AppSettings {
             ollama_base_url: "http://127.0.0.1:11434".to_string(),
             ollama_chat_model: String::new(),
             ollama_embed_model: "nomic-embed-text".to_string(),
+            embed_dimension: 768,
             github_username: None,
+            embeddings_need_rebuild: false,
         }
     }
 }
@@ -33,6 +38,7 @@ pub struct UpdateSettingsRequest {
     pub ollama_base_url: Option<String>,
     pub ollama_chat_model: Option<String>,
     pub ollama_embed_model: Option<String>,
+    pub embed_dimension: Option<i64>,
 }
 
 #[derive(Debug, Deserialize)]
