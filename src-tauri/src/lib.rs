@@ -5,7 +5,7 @@ mod services;
 
 use tauri::Manager;
 
-use commands::{auth, categorize, embed, repos, settings, sync};
+use commands::{auth, categorize, embed, insights, repos, settings, sync};
 use services::categorizer::CategorizeState;
 use services::embed::EmbedState;
 use services::store::{self, DbState};
@@ -15,6 +15,7 @@ use services::sync::SyncState;
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             let path = store::db_path(app.handle())?;
             let conn = store::open_and_migrate(&path)?;
@@ -54,6 +55,10 @@ pub fn run() {
             categorize::recategorize_repo,
             embed::get_embed_status,
             embed::start_embedding,
+            insights::get_insights,
+            insights::get_interest_drift_drilldown,
+            insights::get_library_export,
+            insights::write_library_export,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

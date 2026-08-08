@@ -403,3 +403,110 @@ pub struct EmbedStatus {
     pub dimension: i64,
     pub need_rebuild: bool,
 }
+
+/// Date-range filter for insights aggregations.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct InsightsDateRange {
+    /// `all` | `1y` | `6m` | `custom`
+    pub preset: Option<String>,
+    /// Inclusive ISO-8601 start (used when preset is `custom`)
+    pub start: Option<String>,
+    /// Inclusive ISO-8601 end (used when preset is `custom`)
+    pub end: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct InsightsRequest {
+    pub range: Option<InsightsDateRange>,
+    /// Minutes east of UTC (e.g. -480 for PST). From `-new Date().getTimezoneOffset()`.
+    pub utc_offset_minutes: Option<i32>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct InsightsMeta {
+    pub total_stars: i64,
+    pub span_days: i64,
+    pub short_history: bool,
+    pub range_start: Option<String>,
+    pub range_end: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TimelineBucket {
+    pub period: String,
+    pub count: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StarringTimeline {
+    pub weekly: Vec<TimelineBucket>,
+    pub monthly: Vec<TimelineBucket>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HeatmapCell {
+    /// 0 = Monday … 6 = Sunday
+    pub day_of_week: u8,
+    /// 0–23 in the user's local timezone
+    pub hour: u8,
+    pub count: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SharePoint {
+    pub period: String,
+    pub name: String,
+    pub count: i64,
+    pub share: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct InterestMetric {
+    pub category: String,
+    pub repo_count: i64,
+    pub first_starred: Option<String>,
+    pub last_starred: Option<String>,
+    pub recent_velocity: f64,
+    pub lifetime_velocity: f64,
+    /// `rising` | `dormant` | `steady`
+    pub badge: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FunFacts {
+    pub longest_streak_days: i64,
+    pub biggest_day_count: i64,
+    pub biggest_day_date: Option<String>,
+    pub first_star_at: Option<String>,
+    pub first_star_repo: Option<String>,
+    pub oldest_repo_created_at: Option<String>,
+    pub oldest_repo_name: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct InsightsDashboard {
+    pub meta: InsightsMeta,
+    pub timeline: StarringTimeline,
+    pub heatmap: Vec<HeatmapCell>,
+    pub interest_drift: Vec<SharePoint>,
+    pub language_trend: Vec<SharePoint>,
+    pub interest_metrics: Vec<InterestMetric>,
+    pub fun_facts: FunFacts,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LibraryExport {
+    pub markdown: String,
+    pub json: String,
+}

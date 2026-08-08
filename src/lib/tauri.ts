@@ -5,6 +5,10 @@ import type {
   CategorizeStatus,
   CategoryNode,
   EmbedStatus,
+  InsightsDashboard,
+  InsightsDateRange,
+  InsightsRequest,
+  LibraryExport,
   LibraryFacets,
   ListReposRequest,
   OllamaStatus,
@@ -12,6 +16,7 @@ import type {
   RepoFilters,
   RepoListResult,
   SearchReposRequest,
+  SharePoint,
   SyncResult,
   SyncStatus,
   TaxonomyDraft,
@@ -123,4 +128,28 @@ export function getEmbedStatus() {
 
 export function startEmbedding() {
   return invoke<void>("start_embedding");
+}
+
+export function getInsights(request: InsightsRequest = {}) {
+  return invoke<InsightsDashboard>("get_insights", { request });
+}
+
+export function getInterestDriftDrilldown(
+  category: string,
+  range?: InsightsDateRange | null,
+  utcOffsetMinutes?: number | null,
+) {
+  return invoke<SharePoint[]>("get_interest_drift_drilldown", {
+    range: range ?? null,
+    category,
+    utcOffsetMinutes: utcOffsetMinutes ?? null,
+  });
+}
+
+export function getLibraryExport() {
+  return invoke<LibraryExport>("get_library_export");
+}
+
+export function writeLibraryExport(path: string, format: "markdown" | "json") {
+  return invoke<void>("write_library_export", { path, format });
 }
