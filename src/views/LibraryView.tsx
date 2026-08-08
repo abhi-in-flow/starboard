@@ -23,6 +23,7 @@ export function LibraryView() {
   const debouncedQuery = useDebouncedValue(query, 150);
   const deferredQuery = useDeferredValue(debouncedQuery);
 
+  const searchMode = useUiStore((s) => s.searchMode);
   const sort = useUiStore((s) => s.sort);
   const sortDesc = useUiStore((s) => s.sortDesc);
   const layout = useUiStore((s) => s.layout);
@@ -48,7 +49,7 @@ export function LibraryView() {
   );
 
   const reposQuery = useQuery({
-    queryKey: ["repos", deferredQuery, filters, sort, sortDesc],
+    queryKey: ["repos", deferredQuery, filters, sort, sortDesc, searchMode],
     queryFn: async () => {
       const started = performance.now();
       const result =
@@ -63,10 +64,14 @@ export function LibraryView() {
               filters,
               sort,
               sortDesc,
+              mode: searchMode,
             });
       if (import.meta.env.DEV) {
         console.debug(
-          `[search] ${(performance.now() - started).toFixed(1)}ms — ${result.total} hits`,
+          `[search] ${(performance.now() - started).toFixed(1)}ms — ${result.total} hits` +
+            (result.searchMs != null
+              ? ` (db ${result.searchMs}ms excl. embed)`
+              : ""),
         );
       }
       return result;
@@ -75,6 +80,7 @@ export function LibraryView() {
 
   const items = reposQuery.data?.items ?? [];
   const total = reposQuery.data?.total ?? 0;
+  const searchHint = reposQuery.data?.hint ?? null;
 
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
@@ -134,7 +140,11 @@ export function LibraryView() {
         <CategoryTree />
       </div>
       <div className="flex min-w-0 flex-1 flex-col">
-        <LibraryToolbar searchRef={searchRef} total={total} />
+        <LibraryToolbar
+          searchRef={searchRef}
+          total={total}
+          searchHint={searchHint}
+        />
         <div className="min-h-0 flex-1">
           {reposQuery.isLoading ? (
             <div className="flex h-40 items-center justify-center text-sm text-muted-foreground">

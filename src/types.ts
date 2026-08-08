@@ -103,11 +103,6 @@ export type RepoDetail = {
   categorySource: string | null;
 };
 
-export type RepoListResult = {
-  items: RepoSummary[];
-  total: number;
-};
-
 export type FacetCount = {
   name: string;
   count: number;

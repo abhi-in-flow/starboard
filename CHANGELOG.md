@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.5.0 — Phase 4
+
+- sqlite-vec embeddings (`repo_embeddings` + content-hash staleness) via Ollama `/api/embed`, with `embed://progress` and Build embeddings.
+- Hybrid search: FTS5 ∪ KNN merged with Reciprocal Rank Fusion; Keyword | Semantic | Hybrid toggle (defaults to Hybrid at ≥90% coverage).
+- Graceful Keyword fallback when Ollama is offline or embeddings are missing; embed dimension rebuild path in Settings.
+
 ## 0.4.0 — Phase 3 (thinner cut)
 
 - Categories menu: generate taxonomy via Ollama, edit draft, commit (force replace clears assignments).
