@@ -128,6 +128,10 @@ export function LibraryToolbar({ searchRef, total, searchHint }: Props) {
   const needEmbeddings =
     (embedStatus.data?.staleOrMissing ?? 0) > 0 || coverage < 0.9;
   const hasChips = language != null || topic != null || categoryId != null;
+  // Semantic/Hybrid results are RRF-ordered; sort control would be misleading.
+  const sortedByRelevance =
+    query.trim().length > 0 &&
+    (searchMode === "semantic" || searchMode === "hybrid");
 
   const coverageHint =
     !searchModeInitialized || coverage >= 0.9
@@ -172,17 +176,27 @@ export function LibraryToolbar({ searchRef, total, searchHint }: Props) {
             );
           })}
         </div>
-        <Select value={sort} onValueChange={(v) => setSort(v as RepoSort)}>
-          <SelectTrigger className="h-10 w-36">
-            <SelectValue placeholder="Sort" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="starredAt">Starred</SelectItem>
-            <SelectItem value="stars">Stars</SelectItem>
-            <SelectItem value="pushedAt">Pushed</SelectItem>
-            <SelectItem value="name">Name</SelectItem>
-          </SelectContent>
-        </Select>
+        {sortedByRelevance ? (
+          <Badge
+            variant="secondary"
+            className="h-10 rounded-md px-3 font-normal"
+            title="Results are ordered by fused relevance score"
+          >
+            Sorted by relevance
+          </Badge>
+        ) : (
+          <Select value={sort} onValueChange={(v) => setSort(v as RepoSort)}>
+            <SelectTrigger className="h-10 w-36">
+              <SelectValue placeholder="Sort" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="starredAt">Starred</SelectItem>
+              <SelectItem value="stars">Stars</SelectItem>
+              <SelectItem value="pushedAt">Pushed</SelectItem>
+              <SelectItem value="name">Name</SelectItem>
+            </SelectContent>
+          </Select>
+        )}
         <div className="flex items-center rounded-lg border border-border p-0.5">
           <Button
             type="button"
