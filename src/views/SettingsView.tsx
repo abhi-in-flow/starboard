@@ -33,11 +33,15 @@ function errorMessage(err: unknown): string {
   return "Something went wrong";
 }
 
-function CategoryCountList({ nodes, depth = 0 }: { nodes: CategoryNode[]; depth?: number }) {
+function CategoryCountList({
+  nodes,
+  depth = 0,
+}: {
+  nodes: CategoryNode[];
+  depth?: number;
+}) {
   if (nodes.length === 0) {
-    return (
-      <p className="text-sm text-muted-foreground">No categories yet.</p>
-    );
+    return <p className="text-sm text-muted-foreground">No categories yet.</p>;
   }
   return (
     <ul className="flex flex-col gap-1 text-sm">
@@ -48,7 +52,9 @@ function CategoryCountList({ nodes, depth = 0 }: { nodes: CategoryNode[]; depth?
             style={{ paddingLeft: depth * 12 }}
           >
             <span className="truncate">{node.name}</span>
-            <span className="tabular-nums text-muted-foreground">{node.count}</span>
+            <span className="tabular-nums text-muted-foreground">
+              {node.count}
+            </span>
           </div>
           {node.children.length > 0 ? (
             <CategoryCountList nodes={node.children} depth={depth + 1} />
@@ -147,7 +153,9 @@ function StatusTab() {
               {cat.uncategorizedRepos}
             </span>
             <span className="text-muted-foreground">LLM assignments</span>
-            <span className="font-medium tabular-nums">{cat.llmAssignments}</span>
+            <span className="font-medium tabular-nums">
+              {cat.llmAssignments}
+            </span>
             <span className="text-muted-foreground">Manual assignments</span>
             <span className="font-medium tabular-nums">
               {cat.manualAssignments}
@@ -455,16 +463,16 @@ export function SettingsView() {
                     />
                     <p className="text-xs text-muted-foreground">
                       Must match the embedding model output size
-                      (nomic-embed-text = 768). Changing this requires rebuilding
-                      the vector table.
+                      (nomic-embed-text = 768). Changing this requires
+                      rebuilding the vector table.
                     </p>
                   </div>
                   {needRebuild ? (
                     <div className="rounded-md border border-border bg-muted/40 p-3 text-sm">
                       <p className="mb-2">
                         Embed dimension changed. Rebuild the embeddings table
-                        (this clears existing vectors), then run Build embeddings
-                        from the library.
+                        (this clears existing vectors), then run Build
+                        embeddings from the library.
                       </p>
                       <Button
                         type="button"
@@ -493,7 +501,9 @@ export function SettingsView() {
                         : "Save settings"}
                     </Button>
                     {settingsSaved ? (
-                      <span className="text-sm text-muted-foreground">Saved</span>
+                      <span className="text-sm text-muted-foreground">
+                        Saved
+                      </span>
                     ) : null}
                     {saveSettingsMutation.isError ? (
                       <span className="text-sm text-destructive">
