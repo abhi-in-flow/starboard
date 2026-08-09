@@ -513,3 +513,37 @@ pub struct LibraryExport {
     pub markdown: String,
     pub json: String,
 }
+
+/// Admin overview: embeddings + categorization panels (Settings → Status).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SystemStatus {
+    pub embeddings: EmbeddingsPanel,
+    pub categorization: CategorizationPanel,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EmbeddingsPanel {
+    pub model: String,
+    pub dimension: i64,
+    pub total_repos: i64,
+    pub embedded_repos: i64,
+    pub stale_repos: i64,
+    pub missing_repos: i64,
+    /// embedded_repos / total_repos, or 0 when empty.
+    pub coverage: f64,
+    pub last_embed_at: Option<String>,
+    pub need_rebuild: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CategorizationPanel {
+    pub total_repos: i64,
+    pub categorized_repos: i64,
+    pub uncategorized_repos: i64,
+    pub llm_assignments: i64,
+    pub manual_assignments: i64,
+    pub categories: Vec<CategoryNode>,
+}
