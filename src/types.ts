@@ -74,6 +74,8 @@ export type RepoSummary = {
   archived: boolean;
   unstarred: boolean;
   topics: string[];
+  /** Normalized fused relevance 0–100 for Semantic/Hybrid; absent for keyword/browse. */
+  relevance?: number | null;
 };
 
 export type RepoDetail = {

@@ -193,6 +193,9 @@ pub struct RepoSummary {
     pub archived: bool,
     pub unstarred: bool,
     pub topics: Vec<String>,
+    /// Normalized fused relevance (0–100) for Semantic/Hybrid hits; absent for keyword/browse.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub relevance: Option<u8>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

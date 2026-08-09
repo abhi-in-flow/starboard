@@ -70,6 +70,25 @@ pub fn rrf_merge(ranked_lists: &[Vec<i64>], k: i64) -> Vec<(i64, f64)> {
     merged
 }
 
+/// Normalize fused scores relative to the top hit: top = 100, others proportional.
+/// Empty input returns empty. Safe when max is 0 (all zeros → 0).
+pub fn normalize_relevance(ranked: &[(i64, f64)]) -> Vec<(i64, u8)> {
+    let Some(max_score) = ranked.first().map(|(_, s)| *s) else {
+        return Vec::new();
+    };
+    if max_score <= 0.0 {
+        return ranked.iter().map(|(id, _)| (*id, 0u8)).collect();
+    }
+    ranked
+        .iter()
+        .map(|(id, score)| {
+            let pct = ((*score / max_score) * 100.0).round();
+            let clamped = pct.clamp(0.0, 100.0) as u8;
+            (*id, clamped)
+        })
+        .collect()
+}
+
 pub fn search_repos(conn: &Connection, req: SearchReposRequest) -> AppResult<RepoListResult> {
     search_keyword(conn, req)
 }
@@ -398,10 +417,22 @@ fn materialize_ranked(
         by_id.insert(summary.id, summary);
     }
 
-    // Preserve fused order; drop ids filtered out.
-    let ordered: Vec<RepoSummary> = ranked
+    // Preserve fused order; drop ids filtered out. Normalize vs top of *this* set.
+    let filtered_ranked: Vec<(i64, f64)> = ranked
         .iter()
-        .filter_map(|(id, _)| by_id.remove(id))
+        .filter(|(id, _)| by_id.contains_key(id))
+        .copied()
+        .collect();
+    let relevance_by_id: HashMap<i64, u8> =
+        normalize_relevance(&filtered_ranked).into_iter().collect();
+
+    let ordered: Vec<RepoSummary> = filtered_ranked
+        .iter()
+        .filter_map(|(id, _)| {
+            let mut summary = by_id.remove(id)?;
+            summary.relevance = relevance_by_id.get(id).copied();
+            Some(summary)
+        })
         .collect();
     let total = ordered.len() as i64;
     let start = offset as usize;
@@ -435,6 +466,7 @@ fn map_summary_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<RepoSummary> {
         unstarred: row.get::<_, i64>(8)? != 0,
         topics: serde_json::from_str(&topics_raw.unwrap_or_else(|| "[]".into()))
             .unwrap_or_default(),
+        relevance: None,
     })
 }
 
@@ -516,6 +548,101 @@ mod tests {
         assert!(rrf_merge(&[], 60).is_empty());
         assert_eq!(rrf_merge(&[vec![], vec![5]], 60)[0].0, 5);
         assert!(rrf_merge(&[vec![], vec![]], 60).is_empty());
+    }
+
+    #[test]
+    fn normalize_relevance_top_is_100_and_monotonic() {
+        let ranked = vec![(1, 0.032), (2, 0.016), (3, 0.008)];
+        let norm = normalize_relevance(&ranked);
+        assert_eq!(norm[0], (1, 100));
+        assert_eq!(norm[1].1, 50);
+        assert_eq!(norm[2].1, 25);
+        assert!(norm[0].1 >= norm[1].1 && norm[1].1 >= norm[2].1);
+    }
+
+    #[test]
+    fn normalize_relevance_single_and_empty() {
+        assert_eq!(normalize_relevance(&[(42, 0.01)]), vec![(42, 100)]);
+        assert!(normalize_relevance(&[]).is_empty());
+        // Zero max score is safe.
+        assert_eq!(normalize_relevance(&[(1, 0.0), (2, 0.0)]), vec![(1, 0), (2, 0)]);
+    }
+
+    #[test]
+    fn keyword_and_browse_have_no_relevance() {
+        let conn = test_conn();
+        apply_full_diff(&conn, &[sample(1, "tokio"), sample(2, "serde")]).expect("seed");
+
+        let browse = repos::list_repos(
+            &conn,
+            ListReposRequest {
+                filters: None,
+                sort: None,
+                sort_desc: None,
+                limit: None,
+                offset: None,
+            },
+        )
+        .expect("list");
+        assert!(browse.items.iter().all(|r| r.relevance.is_none()));
+
+        let keyword = search_repos(
+            &conn,
+            SearchReposRequest {
+                query: "tok".into(),
+                filters: Some(RepoFilters::default()),
+                sort: Some(RepoSort::StarredAt),
+                sort_desc: Some(true),
+                limit: None,
+                offset: None,
+                mode: Some(SearchMode::Keyword),
+            },
+        )
+        .expect("search");
+        assert_eq!(keyword.total, 1);
+        assert!(keyword.items[0].relevance.is_none());
+    }
+
+    #[test]
+    fn semantic_attaches_normalized_relevance() {
+        let conn = test_conn();
+        apply_full_diff(&conn, &[sample(1, "a"), sample(2, "b"), sample(3, "c")]).expect("seed");
+        let dim = 768;
+        let near = vec![1.0_f32; dim];
+        let mid = vec![0.5_f32; dim];
+        let far = vec![0.0_f32; dim];
+        for (id, emb) in [(1, &near), (2, &mid), (3, &far)] {
+            upsert_embedding(
+                &conn,
+                id,
+                emb,
+                &content_hash(&format!("doc-{id}")),
+                "nomic-embed-text",
+                dim as i64,
+            )
+            .expect("upsert");
+        }
+        let result = search_semantic(
+            &conn,
+            &SearchReposRequest {
+                query: "anything".into(),
+                filters: Some(RepoFilters::default()),
+                sort: None,
+                sort_desc: None,
+                limit: None,
+                offset: None,
+                mode: Some(SearchMode::Semantic),
+            },
+            &near,
+        )
+        .expect("semantic");
+        assert!(!result.items.is_empty());
+        assert_eq!(result.items[0].relevance, Some(100));
+        for window in result.items.windows(2) {
+            let a = window[0].relevance.unwrap_or(0);
+            let b = window[1].relevance.unwrap_or(0);
+            assert!(a >= b, "relevance must be monotonic with rank");
+        }
     }
 
     #[test]
