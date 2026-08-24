@@ -574,7 +574,9 @@ export function CategoriesView() {
           <CardTitle className="text-base">2. Assign repos</CardTitle>
           <CardDescription>
             Batches uncategorized repos against the committed taxonomy. Manual
-            overrides are never overwritten.
+            overrides are never overwritten. When auto-categorize is on in
+            Settings, new uncategorized repos are assigned after sync once
+            READMEs finish.
           </CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-3">

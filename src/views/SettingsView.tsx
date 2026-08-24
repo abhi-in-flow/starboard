@@ -8,6 +8,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { formatRelative } from "@/lib/format";
@@ -167,6 +168,12 @@ function StatusTab() {
             <span className="font-medium tabular-nums">
               {cat.manualAssignments}
             </span>
+            <span className="text-muted-foreground">
+              Auto-categorize after sync
+            </span>
+            <span className="font-medium">
+              {cat.autoCategorizeAfterSync ? "On" : "Off"}
+            </span>
           </div>
           <div>
             <p className="mb-2 text-xs font-medium text-muted-foreground">
@@ -232,6 +239,7 @@ export function SettingsView() {
   const [chatModel, setChatModel] = useState("");
   const [embedModel, setEmbedModel] = useState("");
   const [embedDimension, setEmbedDimension] = useState("768");
+  const [autoCategorize, setAutoCategorize] = useState(true);
   const [settingsSaved, setSettingsSaved] = useState(false);
 
   const authQuery = useQuery({
@@ -247,6 +255,7 @@ export function SettingsView() {
       setChatModel(settings.ollamaChatModel);
       setEmbedModel(settings.ollamaEmbedModel);
       setEmbedDimension(String(settings.embedDimension));
+      setAutoCategorize(settings.autoCategorizeAfterSync);
       return settings;
     },
   });
@@ -286,6 +295,7 @@ export function SettingsView() {
         ollamaChatModel: chatModel,
         ollamaEmbedModel: embedModel,
         embedDimension: Number.isFinite(parsed) ? parsed : undefined,
+        autoCategorizeAfterSync: autoCategorize,
       });
     },
     onSuccess: (settings) => {
@@ -515,6 +525,26 @@ export function SettingsView() {
                       (nomic-embed-text = 768). Changing this requires
                       rebuilding the vector table.
                     </p>
+                  </div>
+                  <div className="flex items-start gap-2">
+                    <Checkbox
+                      id="auto-categorize"
+                      checked={autoCategorize}
+                      onCheckedChange={(v) => setAutoCategorize(v === true)}
+                      className="mt-0.5"
+                    />
+                    <div className="flex flex-col gap-1">
+                      <Label htmlFor="auto-categorize">
+                        Auto-categorize after sync
+                      </Label>
+                      <p className="text-xs text-muted-foreground">
+                        On by default. After a successful sync and README
+                        fetch, assign only new uncategorized repos with your
+                        committed taxonomy. Manual overrides are never
+                        changed. Silent no-op if Ollama is offline or no
+                        taxonomy is committed.
+                      </p>
+                    </div>
                   </div>
                   {needRebuild ? (
                     <div className="rounded-md border border-border bg-muted/40 p-3 text-sm">
