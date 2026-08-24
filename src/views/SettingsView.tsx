@@ -538,11 +538,10 @@ export function SettingsView() {
                         Auto-categorize after sync
                       </Label>
                       <p className="text-xs text-muted-foreground">
-                        On by default. After a successful sync and README
-                        fetch, assign only new uncategorized repos with your
-                        committed taxonomy. Manual overrides are never
-                        changed. Silent no-op if Ollama is offline or no
-                        taxonomy is committed.
+                        On by default. After a successful sync and README fetch,
+                        assign only new uncategorized repos with your committed
+                        taxonomy. Manual overrides are never changed. Silent
+                        no-op if Ollama is offline or no taxonomy is committed.
                       </p>
                     </div>
                   </div>
