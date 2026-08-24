@@ -2,16 +2,18 @@ use rusqlite::{Connection, OptionalExtension};
 
 use crate::error::AppResult;
 use crate::models::{CategorizationPanel, EmbeddingsPanel, SystemStatus};
+use crate::services::backup;
 use crate::services::categories;
 use crate::services::embed;
 use crate::services::settings;
 
 /// Aggregate embeddings + categorization admin stats for the Settings Status tab.
-pub fn get_system_status(conn: &Connection) -> AppResult<SystemStatus> {
+pub fn get_system_status(conn: &Connection, db_path: &str) -> AppResult<SystemStatus> {
     Ok(SystemStatus {
         embeddings: embeddings_panel(conn)?,
         categorization: categorization_panel(conn)?,
         integrity: None,
+        data: backup::data_panel(conn, db_path)?,
     })
 }
 
@@ -134,7 +136,8 @@ mod tests {
     #[test]
     fn empty_db_is_safe() {
         let conn = test_conn();
-        let status = get_system_status(&conn).expect("status");
+        let status = get_system_status(&conn, "/tmp/starboard.db").expect("status");
+        assert_eq!(status.data.db_path, "/tmp/starboard.db");
         assert_eq!(status.embeddings.total_repos, 0);
         assert_eq!(status.embeddings.embedded_repos, 0);
         assert_eq!(status.embeddings.stale_repos, 0);
@@ -200,7 +203,7 @@ mod tests {
         )
         .expect("assign");
 
-        let status = get_system_status(&conn).expect("status");
+        let status = get_system_status(&conn, "/tmp/starboard.db").expect("status");
 
         assert_eq!(status.embeddings.total_repos, 3);
         assert_eq!(status.embeddings.embedded_repos, 2);

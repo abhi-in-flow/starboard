@@ -2,22 +2,23 @@ import { invoke } from "@tauri-apps/api/core";
 import type {
   AppSettings,
   AuthStatus,
+  BackupResult,
+  BackupValidation,
   CategorizeStatus,
   CategoryNode,
   EmbedStatus,
   InsightsDashboard,
   InsightsDateRange,
   InsightsRequest,
-  IntegrityReport,
-  LibraryExport,
+  IntegrityReport,  LibraryExport,
   LibraryFacets,
   ListReposRequest,
   OllamaStatus,
   RepoDetail,
   RepoFilters,
   RepoListResult,
-  ReviewCounts,
-  SearchReposRequest,
+  RestoreResult,
+  ReviewCounts,  SearchReposRequest,
   SetRepoReviewRequest,
   SetupStatus,
   SharePoint,
@@ -197,4 +198,16 @@ export function getReviewCounts() {
 
 export function setRepoReview(request: SetRepoReviewRequest) {
   return invoke<void>("set_repo_review", { request });
+}
+
+export function createBackup(path: string) {
+  return invoke<BackupResult>("create_backup", { path });
+}
+
+export function validateBackup(path: string) {
+  return invoke<BackupValidation>("validate_backup", { path });
+}
+
+export function restoreBackup(path: string) {
+  return invoke<RestoreResult>("restore_backup", { path });
 }

@@ -339,10 +339,49 @@ export type CategorizationPanel = {
   categories: CategoryNode[];
 };
 
+export type DataPanel = {
+  dbPath: string;
+  lastBackupPath: string | null;
+  lastBackupAt: string | null;
+  lastBackupOk: boolean | null;
+  lastRestoreAt: string | null;
+};
+
+export type IntegrityCheckResult = {
+  ok: boolean;
+  message: string;
+};
+
+export type BackupValidation = {
+  ok: boolean;
+  path: string;
+  schemaVersion: number;
+  repoCount: number;
+  categoryCount: number;
+  message: string;
+};
+
+export type BackupResult = {
+  path: string;
+  createdAt: string;
+  schemaVersion: number;
+  repoCount: number;
+};
+
+export type RestoreResult = {
+  path: string;
+  restoredAt: string;
+  schemaVersion: number;
+  migrated: boolean;
+  preRestoreBackupPath: string;
+  repoCount: number;
+};
+
 export type SystemStatus = {
   embeddings: EmbeddingsPanel;
   categorization: CategorizationPanel;
   integrity?: IntegrityReport | null;
+  data: DataPanel;
 };
 
 /** Mirrored from SetupStatus — first-run checklist snapshot (no Ollama HTTP). */
