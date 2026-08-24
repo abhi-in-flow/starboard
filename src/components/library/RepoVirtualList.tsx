@@ -1,6 +1,6 @@
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { Star } from "lucide-react";
-import { useRef } from "react";
+import { useEffect, useRef } from "react";
 import { REPO_DND_TYPE } from "@/components/library/CategoryTree";
 import { RepoAvatar } from "@/components/library/RepoAvatar";
 import { Badge } from "@/components/ui/badge";
@@ -14,6 +14,7 @@ type Props = {
   layout: LibraryLayout;
   selectedId: number | null;
   onSelect: (id: number) => void;
+  onEndReached?: () => void;
 };
 
 function repoNameParts(fullName: string): { owner: string; name: string } {
@@ -144,6 +145,7 @@ export function RepoVirtualList({
   layout,
   selectedId,
   onSelect,
+  onEndReached,
 }: Props) {
   const parentRef = useRef<HTMLDivElement>(null);
   const isGrid = layout === "grid";
@@ -157,6 +159,17 @@ export function RepoVirtualList({
     estimateSize: () => estimate,
     overscan: 8,
   });
+
+  const virtualItems = virtualizer.getVirtualItems();
+  const lastVirtual = virtualItems[virtualItems.length - 1];
+  useEffect(() => {
+    if (!onEndReached || lastVirtual == null) {
+      return;
+    }
+    if (lastVirtual.index >= rowCount - 2) {
+      onEndReached();
+    }
+  }, [lastVirtual, onEndReached, rowCount]);
 
   return (
     <div ref={parentRef} className="h-full overflow-auto">

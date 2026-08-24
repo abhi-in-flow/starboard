@@ -2,18 +2,18 @@ use rusqlite::{params_from_iter, Connection, Row};
 
 use crate::error::{AppError, AppResult};
 use crate::models::{
-    FacetCount, LibraryFacets, ListReposRequest, RepoDetail, RepoFilters, RepoListResult,
-    RepoSort, RepoSummary,
+    FacetCount, LibraryFacets, ListReposRequest, RepoDetail, RepoFilters, RepoListResult, RepoSort,
+    RepoSummary,
 };
 
-const DEFAULT_LIMIT: i64 = 5000;
-const MAX_LIMIT: i64 = 10_000;
+pub const DEFAULT_PAGE_SIZE: i64 = 100;
+const MAX_LIMIT: i64 = 500;
 
 pub fn list_repos(conn: &Connection, req: ListReposRequest) -> AppResult<RepoListResult> {
     let filters = req.filters.unwrap_or_default();
     let sort = req.sort.unwrap_or_default();
     let sort_desc = req.sort_desc.unwrap_or(true);
-    let limit = req.limit.unwrap_or(DEFAULT_LIMIT).clamp(1, MAX_LIMIT);
+    let limit = req.limit.unwrap_or(DEFAULT_PAGE_SIZE).clamp(1, MAX_LIMIT);
     let offset = req.offset.unwrap_or(0).max(0);
 
     let (where_sql, bind) = build_filter_clause(&filters, None)?;
@@ -368,5 +368,58 @@ mod tests {
         let detail = get_repo(&conn, 9).expect("get");
         assert_eq!(detail.name, "detail");
         assert!(detail.topics.contains(&"async".into()));
+    }
+
+    #[test]
+    fn pagination_is_stable_and_reports_total() {
+        let conn = test_conn();
+        apply_full_diff(
+            &conn,
+            &[
+                sample(1, "alpha", "Rust", 10),
+                sample(2, "beta", "Go", 50),
+                sample(3, "gamma", "Rust", 30),
+                sample(4, "delta", "Rust", 5),
+            ],
+        )
+        .expect("seed");
+
+        let page1 = list_repos(
+            &conn,
+            ListReposRequest {
+                filters: Some(RepoFilters {
+                    language: Some("Rust".into()),
+                    ..Default::default()
+                }),
+                sort: Some(RepoSort::Stars),
+                sort_desc: Some(true),
+                limit: Some(2),
+                offset: Some(0),
+            },
+        )
+        .expect("p1");
+        assert_eq!(page1.total, 3);
+        assert_eq!(page1.items.len(), 2);
+        assert_eq!(page1.items[0].full_name, "owner/gamma");
+        assert_eq!(page1.items[1].full_name, "owner/alpha");
+
+        let page2 = list_repos(
+            &conn,
+            ListReposRequest {
+                filters: Some(RepoFilters {
+                    language: Some("Rust".into()),
+                    ..Default::default()
+                }),
+                sort: Some(RepoSort::Stars),
+                sort_desc: Some(true),
+                limit: Some(2),
+                offset: Some(2),
+            },
+        )
+        .expect("p2");
+        assert_eq!(page2.total, 3);
+        assert_eq!(page2.items.len(), 1);
+        assert_eq!(page2.items[0].full_name, "owner/delta");
+        assert_ne!(page1.items[0].id, page2.items[0].id);
     }
 }

@@ -8,9 +8,10 @@ use time::OffsetDateTime;
 
 use crate::error::{AppError, AppResult};
 use crate::models::{EmbedProgress, EmbedStatus};
+use crate::services::jobs::CancelFlag;
 use crate::services::ollama::OllamaClient;
 use crate::services::settings;
-use crate::services::store::DbState;
+use crate::services::store::{self, DbState};
 
 /// Repos per `/api/embed` call (task: batch e.g. 32).
 const EMBED_BATCH_SIZE: usize = 32;
@@ -18,6 +19,7 @@ const EMBED_BATCH_SIZE: usize = 32;
 pub struct EmbedState {
     pub running: AtomicBool,
     pub last_error: Mutex<Option<String>>,
+    pub cancel: CancelFlag,
 }
 
 impl Default for EmbedState {
@@ -25,8 +27,17 @@ impl Default for EmbedState {
         Self {
             running: AtomicBool::new(false),
             last_error: Mutex::new(None),
+            cancel: CancelFlag::default(),
         }
     }
+}
+
+pub fn request_cancel(state: &EmbedState) -> AppResult<()> {
+    if !state.running.load(Ordering::SeqCst) {
+        return Err(AppError::ollama("embedding pipeline is not running"));
+    }
+    state.cancel.request();
+    Ok(())
 }
 
 #[derive(Debug, Clone)]
@@ -49,6 +60,27 @@ pub fn build_document(
         description.unwrap_or(""),
         readme_excerpt.unwrap_or("")
     )
+}
+
+#[cfg(test)]
+pub fn refresh_document_hash(conn: &Connection, repo_id: i64) -> AppResult<String> {
+    let (full_name, description, topics, readme): (String, Option<String>, String, Option<String>) =
+        conn.query_row(
+            "SELECT full_name, description, topics, readme_excerpt FROM repos WHERE id = ?1",
+            [repo_id],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+        )?;
+    let hash = content_hash(&build_document(
+        &full_name,
+        description.as_deref(),
+        &topics,
+        readme.as_deref(),
+    ));
+    conn.execute(
+        "UPDATE repos SET document_hash = ?1 WHERE id = ?2",
+        params![hash, repo_id],
+    )?;
+    Ok(hash)
 }
 
 pub fn content_hash(document: &str) -> String {
@@ -75,14 +107,51 @@ fn now_rfc3339() -> String {
         .unwrap_or_else(|_| "1970-01-01T00:00:00Z".into())
 }
 
+/// Cheap SQL counts — no per-repo hashing. Relies on persisted `repos.document_hash`.
+pub fn embed_coverage_counts(conn: &Connection) -> AppResult<(i64, i64, i64, i64)> {
+    let total_repos: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM repos WHERE unstarred = 0",
+        [],
+        |row| row.get(0),
+    )?;
+    let embedded_repos: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM repo_embedding_meta m
+         JOIN repos r ON r.id = m.repo_id
+         WHERE r.unstarred = 0",
+        [],
+        |row| row.get(0),
+    )?;
+    let missing_repos: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM repos r
+         LEFT JOIN repo_embedding_meta m ON m.repo_id = r.id
+         WHERE r.unstarred = 0 AND m.repo_id IS NULL",
+        [],
+        |row| row.get(0),
+    )?;
+    let stale_repos: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM repos r
+         JOIN repo_embedding_meta m ON m.repo_id = r.id
+         WHERE r.unstarred = 0
+           AND r.document_hash IS NOT NULL
+           AND m.content_hash != r.document_hash",
+        [],
+        |row| row.get(0),
+    )?;
+    Ok((total_repos, embedded_repos, missing_repos, stale_repos))
+}
+
 /// Repos that lack an embedding row or whose stored content_hash is stale.
+/// Uses persisted `document_hash` so status/listing does not hash the library.
 pub fn list_stale_or_missing(conn: &Connection) -> AppResult<Vec<EmbedDoc>> {
     let mut stmt = conn.prepare(
         "SELECT r.id, r.full_name, r.description, r.topics, r.readme_excerpt,
-                m.content_hash
+                r.document_hash
          FROM repos r
          LEFT JOIN repo_embedding_meta m ON m.repo_id = r.id
          WHERE r.unstarred = 0
+           AND (m.repo_id IS NULL
+                OR r.document_hash IS NULL
+                OR m.content_hash != r.document_hash)
          ORDER BY r.id",
     )?;
     let rows = stmt.query_map([], |row| {
@@ -98,44 +167,27 @@ pub fn list_stale_or_missing(conn: &Connection) -> AppResult<Vec<EmbedDoc>> {
 
     let mut out = Vec::new();
     for row in rows {
-        let (id, full_name, description, topics, readme, stored_hash) = row?;
+        let (id, full_name, description, topics, readme, stored_doc_hash) = row?;
         let document = build_document(
             &full_name,
             description.as_deref(),
             &topics,
             readme.as_deref(),
         );
-        let hash = content_hash(&document);
-        let needs = match stored_hash {
-            None => true,
-            Some(h) => h != hash,
-        };
-        if needs {
-            out.push(EmbedDoc {
-                repo_id: id,
-                document,
-                content_hash: hash,
-            });
-        }
+        let hash = stored_doc_hash.unwrap_or_else(|| content_hash(&document));
+        out.push(EmbedDoc {
+            repo_id: id,
+            document,
+            content_hash: hash,
+        });
     }
     Ok(out)
 }
 
 pub fn get_embed_status(conn: &Connection, state: &EmbedState) -> AppResult<EmbedStatus> {
     let settings = settings::get_settings(conn)?;
-    let total_repos: i64 = conn.query_row(
-        "SELECT COUNT(*) FROM repos WHERE unstarred = 0",
-        [],
-        |row| row.get(0),
-    )?;
-    let embedded_repos: i64 = conn.query_row(
-        "SELECT COUNT(*) FROM repo_embedding_meta m
-         JOIN repos r ON r.id = m.repo_id
-         WHERE r.unstarred = 0",
-        [],
-        |row| row.get(0),
-    )?;
-    let stale = list_stale_or_missing(conn)?.len() as i64;
+    let (total_repos, embedded_repos, missing, stale) = embed_coverage_counts(conn)?;
+    let stale_or_missing = missing + stale;
     let coverage = if total_repos == 0 {
         0.0
     } else {
@@ -150,7 +202,7 @@ pub fn get_embed_status(conn: &Connection, state: &EmbedState) -> AppResult<Embe
         running: state.running.load(Ordering::SeqCst),
         total_repos,
         embedded_repos,
-        stale_or_missing: stale,
+        stale_or_missing,
         coverage,
         last_error,
         model: settings.ollama_embed_model,
@@ -174,27 +226,28 @@ pub fn upsert_embedding(
         )));
     }
     let bytes = embedding_to_bytes(embedding);
-    // Replace any existing vector row, then refresh meta.
-    conn.execute(
-        "DELETE FROM repo_embeddings WHERE repo_id = ?1",
-        params![repo_id],
-    )?;
-    conn.execute(
-        "INSERT INTO repo_embeddings(repo_id, embedding) VALUES (?1, ?2)",
-        params![repo_id, bytes],
-    )?;
     let embedded_at = now_rfc3339();
-    conn.execute(
-        "INSERT INTO repo_embedding_meta (repo_id, content_hash, model, dimension, embedded_at)
-         VALUES (?1, ?2, ?3, ?4, ?5)
-         ON CONFLICT(repo_id) DO UPDATE SET
-           content_hash = excluded.content_hash,
-           model = excluded.model,
-           dimension = excluded.dimension,
-           embedded_at = excluded.embedded_at",
-        params![repo_id, content_hash, model, dimension, embedded_at],
-    )?;
-    Ok(())
+    store::with_tx(conn, |tx| {
+        tx.execute(
+            "DELETE FROM repo_embeddings WHERE repo_id = ?1",
+            params![repo_id],
+        )?;
+        tx.execute(
+            "INSERT INTO repo_embeddings(repo_id, embedding) VALUES (?1, ?2)",
+            params![repo_id, bytes],
+        )?;
+        tx.execute(
+            "INSERT INTO repo_embedding_meta (repo_id, content_hash, model, dimension, embedded_at)
+             VALUES (?1, ?2, ?3, ?4, ?5)
+             ON CONFLICT(repo_id) DO UPDATE SET
+               content_hash = excluded.content_hash,
+               model = excluded.model,
+               dimension = excluded.dimension,
+               embedded_at = excluded.embedded_at",
+            params![repo_id, content_hash, model, dimension, embedded_at],
+        )?;
+        Ok(())
+    })
 }
 
 /// Pure trigger gate for launch / post-README auto-embed.
@@ -279,7 +332,14 @@ pub async fn auto_embed_stale_if_reachable(conn: &Connection) -> AppResult<usize
         let inputs: Vec<String> = chunk.iter().map(|d| d.document.clone()).collect();
         let vectors = client.embed(&inputs).await?;
         for (doc, embedding) in chunk.iter().zip(vectors.iter()) {
-            upsert_embedding(conn, doc.repo_id, embedding, &doc.content_hash, model, dimension)?;
+            upsert_embedding(
+                conn,
+                doc.repo_id,
+                embedding,
+                &doc.content_hash,
+                model,
+                dimension,
+            )?;
             updated += 1;
         }
     }
@@ -356,6 +416,7 @@ pub async fn run_embed_pipeline(app: AppHandle) -> AppResult<()> {
     {
         return Err(AppError::ollama("embedding pipeline is already running"));
     }
+    embed_state.cancel.reset();
     if let Ok(mut guard) = embed_state.last_error.lock() {
         *guard = None;
     }
@@ -421,14 +482,27 @@ async fn run_embed_pipeline_inner(app: &AppHandle) -> AppResult<()> {
     let mut updated: i64 = 0;
 
     for chunk in pending.chunks(EMBED_BATCH_SIZE) {
+        if let Err(e) = app.state::<EmbedState>().cancel.check() {
+            let finished = now_rfc3339();
+            let msg = e.message.clone();
+            with_db(app, |conn| {
+                finish_sync_log(conn, log_id, &finished, "cancelled", Some(&msg), updated)
+            })?;
+            return Err(e);
+        }
         let inputs: Vec<String> = chunk.iter().map(|d| d.document.clone()).collect();
         let vectors = match client.embed(&inputs).await {
             Ok(v) => v,
             Err(e) => {
                 let finished = now_rfc3339();
                 let msg = e.message.clone();
+                let status = if e.is_cancelled() {
+                    "cancelled"
+                } else {
+                    "error"
+                };
                 with_db(app, |conn| {
-                    finish_sync_log(conn, log_id, &finished, "error", Some(&msg), updated)
+                    finish_sync_log(conn, log_id, &finished, status, Some(&msg), updated)
                 })?;
                 emit_progress(
                     app,
@@ -565,6 +639,7 @@ mod tests {
             [],
         )
         .expect("update");
+        refresh_document_hash(&conn, 1).expect("hash");
         let stale3 = list_stale_or_missing(&conn).expect("stale3");
         assert_eq!(stale3.len(), 2);
         assert!(stale3.iter().any(|d| d.repo_id == 1));
@@ -639,6 +714,7 @@ mod tests {
             [],
         )
         .expect("change");
+        refresh_document_hash(&conn, 10).expect("hash");
         let again = list_stale_or_missing(&conn).expect("again");
         assert_eq!(again.len(), 1);
         assert_eq!(again[0].repo_id, 10);
@@ -708,10 +784,9 @@ mod tests {
         )
         .expect("settings");
 
-        assert!(is_ollama_reachable_for_embed(
-            &settings::get_settings(&conn).expect("settings")
-        )
-        .await);
+        assert!(
+            is_ollama_reachable_for_embed(&settings::get_settings(&conn).expect("settings")).await
+        );
         let n = auto_embed_stale_if_reachable(&conn)
             .await
             .expect("auto embed");
@@ -724,6 +799,7 @@ mod tests {
             [],
         )
         .expect("update");
+        refresh_document_hash(&conn, 20).expect("hash");
         let stale = list_stale_or_missing(&conn).expect("stale");
         assert_eq!(stale.len(), 1);
         assert_eq!(stale[0].repo_id, 20);
@@ -779,6 +855,50 @@ mod tests {
             .await
             .expect("silent skip");
         assert_eq!(n, 0);
-        assert_eq!(list_stale_or_missing(&conn).expect("still pending").len(), 1);
+        assert_eq!(
+            list_stale_or_missing(&conn).expect("still pending").len(),
+            1
+        );
+    }
+
+    #[test]
+    fn embed_status_is_cheap_sql_after_description_change() {
+        let conn = test_conn();
+        apply_full_diff(&conn, &[sample(1, "mem0", "agent memory")]).expect("seed");
+        let stale = list_stale_or_missing(&conn).expect("stale");
+        let fake = vec![0.01_f32; 768];
+        upsert_embedding(
+            &conn,
+            1,
+            &fake,
+            &stale[0].content_hash,
+            "nomic-embed-text",
+            768,
+        )
+        .expect("embed");
+        let (total, embedded, missing, stale_n) = embed_coverage_counts(&conn).expect("counts");
+        assert_eq!((total, embedded, missing, stale_n), (1, 1, 0, 0));
+
+        conn.execute(
+            "UPDATE repos SET description = 'readme changed later' WHERE id = 1",
+            [],
+        )
+        .expect("desc");
+        refresh_document_hash(&conn, 1).expect("hash");
+        let (total2, embedded2, missing2, stale2) = embed_coverage_counts(&conn).expect("counts2");
+        assert_eq!((total2, embedded2, missing2, stale2), (1, 1, 0, 1));
+        assert_eq!(list_stale_or_missing(&conn).expect("stale").len(), 1);
+    }
+
+    #[test]
+    fn upsert_embedding_rolls_back_meta_when_vector_insert_fails() {
+        let conn = test_conn();
+        apply_full_diff(&conn, &[sample(1, "x", "y")]).expect("seed");
+        let err = crate::services::store::with_tx(&conn, |tx| {
+            tx.execute("DELETE FROM repo_embedding_meta WHERE repo_id = 1", [])?;
+            Err::<(), _>(AppError::db("injected embed failure"))
+        })
+        .expect_err("fail");
+        assert_eq!(err.message, "injected embed failure");
     }
 }

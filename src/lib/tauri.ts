@@ -8,6 +8,7 @@ import type {
   InsightsDashboard,
   InsightsDateRange,
   InsightsRequest,
+  IntegrityReport,
   LibraryExport,
   LibraryFacets,
   ListReposRequest,
@@ -63,6 +64,14 @@ export function getSyncStatus() {
   return invoke<SyncStatus>("get_sync_status");
 }
 
+export function cancelSync() {
+  return invoke<void>("cancel_sync");
+}
+
+export function cancelReadmeQueue() {
+  return invoke<void>("cancel_readme_queue");
+}
+
 export function listRepos(request: ListReposRequest = {}) {
   return invoke<RepoListResult>("list_repos", { request });
 }
@@ -109,6 +118,10 @@ export function startAssignment() {
   return invoke<void>("start_assignment");
 }
 
+export function cancelAssignment() {
+  return invoke<void>("cancel_assignment");
+}
+
 export function getCategorizeStatus() {
   return invoke<CategorizeStatus>("get_categorize_status");
 }
@@ -129,6 +142,10 @@ export function getEmbedStatus() {
 
 export function startEmbedding() {
   return invoke<void>("start_embedding");
+}
+
+export function cancelEmbedding() {
+  return invoke<void>("cancel_embedding");
 }
 
 export function getInsights(request: InsightsRequest = {}) {
@@ -157,4 +174,8 @@ export function writeLibraryExport(path: string, format: "markdown" | "json") {
 
 export function getSystemStatus() {
   return invoke<SystemStatus>("get_system_status");
+}
+
+export function checkDbIntegrity() {
+  return invoke<IntegrityReport>("check_db_integrity");
 }

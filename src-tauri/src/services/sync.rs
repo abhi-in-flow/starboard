@@ -10,9 +10,32 @@ use tokio::sync::Mutex;
 
 use crate::error::{AppError, AppResult};
 use crate::models::{StarredRepo, SyncProgress, SyncResult, SyncStatus};
-use crate::services::github::GitHubClient;
-use crate::services::settings::{self, KEY_LAST_SYNCED_AT, KEY_STARRED_ETAG};
-use crate::services::store::DbState;
+use crate::services::github::{GitHubClient, ReadmeFetch};
+use crate::services::jobs::CancelFlag;
+use crate::services::settings::{
+    self, KEY_INCREMENTAL_SINCE_RECONCILE, KEY_LAST_FULL_RECONCILE_AT, KEY_LAST_SYNCED_AT,
+    KEY_STARRED_ETAG,
+};
+use crate::services::store::{self, DbState};
+
+/// Incremental `/user/starred` pagination stops at the first page of already-known
+/// `(id, starred_at)` pairs and never walks the tail. It therefore **cannot**
+/// detect unstars. Claiming otherwise would be a production lie.
+///
+/// Policy:
+/// - ETag 304 still means "the starred list is unchanged" (including no unstars).
+/// - Incremental Sync upserts new/changed stars only (`repos_removed` stays 0).
+/// - Unstars are applied only on a full library walk (Full sync).
+/// - Incremental Sync auto-upgrades to a full reconcile after 7 days **or**
+///   7 incremental Syncs, whichever comes first.
+///
+/// Users can always run Full sync immediately.
+pub const UNSTAR_POLICY: &str = "Incremental Sync updates new and changed stars only. \
+Unstars are detected on Full sync (automatic every 7 days or 7 incremental Syncs). \
+A 304 ETag response still means the starred list is unchanged.";
+
+const RECONCILE_EVERY_N_INCREMENTAL: i64 = 7;
+const RECONCILE_AFTER_SECS: i64 = 7 * 24 * 60 * 60;
 
 /// Max in-flight README requests.
 const README_CONCURRENCY: usize = 6;
@@ -22,6 +45,8 @@ const README_MIN_INTERVAL: Duration = Duration::from_millis(167);
 pub struct SyncState {
     pub running: AtomicBool,
     pub readme_running: AtomicBool,
+    pub cancel_sync: CancelFlag,
+    pub cancel_readme: CancelFlag,
 }
 
 impl Default for SyncState {
@@ -29,8 +54,26 @@ impl Default for SyncState {
         Self {
             running: AtomicBool::new(false),
             readme_running: AtomicBool::new(false),
+            cancel_sync: CancelFlag::default(),
+            cancel_readme: CancelFlag::default(),
         }
     }
+}
+
+pub fn request_cancel_sync(state: &SyncState) -> AppResult<()> {
+    if !state.running.load(Ordering::SeqCst) {
+        return Err(AppError::sync("no sync is running"));
+    }
+    state.cancel_sync.request();
+    Ok(())
+}
+
+pub fn request_cancel_readme(state: &SyncState) -> AppResult<()> {
+    if !state.readme_running.load(Ordering::SeqCst) {
+        return Err(AppError::sync("README queue is not running"));
+    }
+    state.cancel_readme.request();
+    Ok(())
 }
 
 #[derive(Debug, Clone, Default)]
@@ -42,10 +85,7 @@ pub struct DiffStats {
 
 /// Pure sync-diff helper: soft-deletes local ids missing from remote.
 pub fn diff_unstarred(local_active_ids: &HashSet<i64>, remote_ids: &HashSet<i64>) -> Vec<i64> {
-    local_active_ids
-        .difference(remote_ids)
-        .copied()
-        .collect()
+    local_active_ids.difference(remote_ids).copied().collect()
 }
 
 pub fn get_sync_status(
@@ -56,13 +96,44 @@ pub fn get_sync_status(
     let last_synced_at = settings::get_value(conn, KEY_LAST_SYNCED_AT)?;
     let last_result = latest_sync_result(conn)?;
     let pending_readmes = count_pending_readmes(conn)?;
+    let last_full_reconcile_at = settings::get_value(conn, KEY_LAST_FULL_RECONCILE_AT)?;
+    let due = reconcile_due(conn)?;
     Ok(SyncStatus {
         running,
         readme_running,
         pending_readmes,
         last_synced_at,
         last_result,
+        last_full_reconcile_at,
+        reconcile_due: due,
+        unstar_policy: UNSTAR_POLICY.to_string(),
     })
+}
+
+/// See [`UNSTAR_POLICY`]: incremental cannot detect unstars.
+pub fn reconcile_due(conn: &Connection) -> AppResult<bool> {
+    let count = settings::get_value(conn, KEY_INCREMENTAL_SINCE_RECONCILE)?
+        .and_then(|s| s.parse::<i64>().ok())
+        .unwrap_or(0);
+    if count >= RECONCILE_EVERY_N_INCREMENTAL {
+        return Ok(true);
+    }
+    match settings::get_value(conn, KEY_LAST_FULL_RECONCILE_AT)? {
+        None => {
+            let has_repos: i64 =
+                conn.query_row("SELECT COUNT(*) FROM repos", [], |row| row.get(0))?;
+            Ok(has_repos > 0)
+        }
+        Some(iso) => {
+            let Ok(parsed) =
+                OffsetDateTime::parse(&iso, &time::format_description::well_known::Rfc3339)
+            else {
+                return Ok(true);
+            };
+            let age = OffsetDateTime::now_utc() - parsed;
+            Ok(age.whole_seconds() >= RECONCILE_AFTER_SECS)
+        }
+    }
 }
 
 fn latest_sync_result(conn: &Connection) -> AppResult<Option<SyncResult>> {
@@ -98,6 +169,7 @@ pub async fn run_sync(app: AppHandle, full: bool) -> AppResult<SyncResult> {
     {
         return Err(AppError::sync("a sync is already running"));
     }
+    sync_state.cancel_sync.reset();
 
     let result = run_sync_inner(&app, full).await;
     sync_state.running.store(false, Ordering::SeqCst);
@@ -109,16 +181,27 @@ async fn run_sync_inner(app: &AppHandle, full: bool) -> AppResult<SyncResult> {
         .ok_or_else(|| AppError::auth("GitHub PAT is not configured"))?;
     let client = GitHubClient::production(pat)?;
 
-    let kind = if full { "full" } else { "incremental" };
+    let promote_to_full = if full {
+        true
+    } else {
+        with_db(app, reconcile_due)?
+    };
+    let kind = if promote_to_full {
+        "full"
+    } else {
+        "incremental"
+    };
     let started_at = now_rfc3339();
     let log_id = with_db(app, |conn| begin_sync_log(conn, kind, &started_at))?;
 
-    emit_progress(
-        app,
-        progress(kind, 0, 0, "Fetching starred repositories…", None),
-    );
+    let start_message = if !full && promote_to_full {
+        "Periodic full reconcile (unstar detection)…"
+    } else {
+        "Fetching starred repositories…"
+    };
+    emit_progress(app, progress(kind, 0, 0, start_message, None));
 
-    let sync_outcome = if full {
+    let sync_outcome = if promote_to_full {
         full_sync(app, &client).await
     } else {
         incremental_sync(app, &client).await
@@ -169,10 +252,25 @@ async fn run_sync_inner(app: &AppHandle, full: bool) -> AppResult<SyncResult> {
         Err(e) => {
             let finished = now_rfc3339();
             let empty = DiffStats::default();
+            let status = if e.is_cancelled() {
+                "cancelled"
+            } else {
+                "error"
+            };
             let msg = e.message.clone();
             let _ = with_db(app, |conn| {
-                finish_sync_log(conn, log_id, &finished, &empty, "error", Some(&msg))
+                finish_sync_log(conn, log_id, &finished, &empty, status, Some(&msg))
             });
+            emit_progress(
+                app,
+                progress(
+                    kind,
+                    0,
+                    0,
+                    format!("Sync {status}: {msg}"),
+                    Some(msg.clone()),
+                ),
+            );
             Err(e)
         }
     }
@@ -205,6 +303,7 @@ pub fn spawn_readme_queue_if_needed(app: AppHandle) {
     {
         return;
     }
+    sync_state.cancel_readme.reset();
 
     tauri::async_runtime::spawn(async move {
         // Clears readme_running even if the task panics.
@@ -254,6 +353,7 @@ async fn full_sync(app: &AppHandle, client: &GitHubClient) -> AppResult<DiffStat
     let mut page_num = 0u32;
 
     loop {
+        check_sync_cancel(app)?;
         page_num += 1;
         let page = client.fetch_starred_page(next.as_deref(), None).await?;
         if page_num == 1 {
@@ -276,11 +376,11 @@ async fn full_sync(app: &AppHandle, client: &GitHubClient) -> AppResult<DiffStat
         }
     }
 
-    if let Some(etag) = page_etag {
-        with_db(app, |conn| settings::set_value(conn, KEY_STARRED_ETAG, &etag))?;
-    }
-
-    with_db(app, |conn| apply_full_diff(conn, &all))
+    // Persist ETag only after the full apply commits. A failed apply must
+    // never leave a newer ETag (would hide the failed page of work on 304).
+    with_db(app, |conn| {
+        commit_full_apply(conn, &all, page_etag.as_deref())
+    })
 }
 
 async fn incremental_sync(app: &AppHandle, client: &GitHubClient) -> AppResult<DiffStats> {
@@ -295,10 +395,6 @@ async fn incremental_sync(app: &AppHandle, client: &GitHubClient) -> AppResult<D
         return Ok(DiffStats::default());
     }
 
-    if let Some(etag) = &first.etag {
-        with_db(app, |conn| settings::set_value(conn, KEY_STARRED_ETAG, etag))?;
-    }
-
     let known = with_db(app, load_known_star_pairs)?;
     let mut collected = Vec::new();
     let mut page_num = 0u32;
@@ -306,6 +402,7 @@ async fn incremental_sync(app: &AppHandle, client: &GitHubClient) -> AppResult<D
     let mut current_next = first.next_url;
 
     loop {
+        check_sync_cancel(app)?;
         page_num += 1;
         emit_progress(
             app,
@@ -333,7 +430,56 @@ async fn incremental_sync(app: &AppHandle, client: &GitHubClient) -> AppResult<D
         current_next = page.next_url;
     }
 
-    with_db(app, |conn| apply_upserts_only(conn, &collected))
+    // Incremental never marks unstars — see UNSTAR_POLICY. ETag is written
+    // in the same transaction as the upserts.
+    with_db(app, |conn| {
+        commit_incremental_apply(conn, &collected, first.etag.as_deref())
+    })
+}
+
+fn check_sync_cancel(app: &AppHandle) -> AppResult<()> {
+    app.state::<SyncState>().cancel_sync.check()
+}
+
+/// Apply a full remote snapshot + persist ETag + record reconcile time.
+/// All-or-nothing: apply failure rolls back the ETag write.
+pub fn commit_full_apply(
+    conn: &Connection,
+    remote: &[StarredRepo],
+    etag: Option<&str>,
+) -> AppResult<DiffStats> {
+    store::with_tx(conn, |tx| {
+        let stats = apply_full_diff(tx, remote)?;
+        if let Some(tag) = etag {
+            settings::set_value(tx, KEY_STARRED_ETAG, tag)?;
+        }
+        settings::set_value(tx, KEY_LAST_FULL_RECONCILE_AT, &now_rfc3339())?;
+        settings::set_value(tx, KEY_INCREMENTAL_SINCE_RECONCILE, "0")?;
+        Ok(stats)
+    })
+}
+
+/// Upsert-only apply + ETag. Does not mark unstars.
+pub fn commit_incremental_apply(
+    conn: &Connection,
+    remote: &[StarredRepo],
+    etag: Option<&str>,
+) -> AppResult<DiffStats> {
+    store::with_tx(conn, |tx| {
+        let stats = apply_upserts_only(tx, remote)?;
+        if let Some(tag) = etag {
+            settings::set_value(tx, KEY_STARRED_ETAG, tag)?;
+        }
+        let prev = settings::get_value(tx, KEY_INCREMENTAL_SINCE_RECONCILE)?
+            .and_then(|s| s.parse::<i64>().ok())
+            .unwrap_or(0);
+        settings::set_value(
+            tx,
+            KEY_INCREMENTAL_SINCE_RECONCILE,
+            &(prev.saturating_add(1)).to_string(),
+        )?;
+        Ok(stats)
+    })
 }
 
 fn page_all_known(repos: &[StarredRepo], known: &HashMap<i64, String>) -> bool {
@@ -409,16 +555,37 @@ fn upsert_repo(conn: &Connection, repo: &StarredRepo) -> AppResult<UpsertKind> {
         |row| row.get(0),
     )?;
 
+    let existing_readme: Option<String> = if exists {
+        conn.query_row(
+            "SELECT readme_excerpt FROM repos WHERE id = ?1",
+            [repo.id],
+            |row| row.get(0),
+        )
+        .ok()
+        .flatten()
+    } else {
+        None
+    };
+    let document_hash =
+        crate::services::embed::content_hash(&crate::services::embed::build_document(
+            &repo.full_name,
+            repo.description.as_deref(),
+            &repo.topics,
+            existing_readme.as_deref(),
+        ));
+
     let fetched_at = now_rfc3339();
     conn.execute(
         "INSERT INTO repos (
             id, full_name, owner, name, description, language, topics,
             stars_count, forks_count, open_issues, license, homepage, html_url,
-            archived, fork, repo_created_at, pushed_at, starred_at, fetched_at, unstarred
+            archived, fork, repo_created_at, pushed_at, starred_at, fetched_at, unstarred,
+            document_hash
          ) VALUES (
             ?1, ?2, ?3, ?4, ?5, ?6, ?7,
             ?8, ?9, ?10, ?11, ?12, ?13,
-            ?14, ?15, ?16, ?17, ?18, ?19, 0
+            ?14, ?15, ?16, ?17, ?18, ?19, 0,
+            ?20
          )
          ON CONFLICT(id) DO UPDATE SET
             full_name = excluded.full_name,
@@ -439,7 +606,8 @@ fn upsert_repo(conn: &Connection, repo: &StarredRepo) -> AppResult<UpsertKind> {
             pushed_at = excluded.pushed_at,
             starred_at = excluded.starred_at,
             fetched_at = excluded.fetched_at,
-            unstarred = 0",
+            unstarred = 0,
+            document_hash = excluded.document_hash",
         params![
             repo.id,
             repo.full_name,
@@ -460,6 +628,7 @@ fn upsert_repo(conn: &Connection, repo: &StarredRepo) -> AppResult<UpsertKind> {
             repo.pushed_at,
             repo.starred_at,
             fetched_at,
+            document_hash,
         ],
     )?;
 
@@ -470,21 +639,24 @@ fn upsert_repo(conn: &Connection, repo: &StarredRepo) -> AppResult<UpsertKind> {
     })
 }
 
+fn pending_readme_sql() -> &'static str {
+    "unstarred = 0 AND (readme_excerpt IS NULL OR readme_status = 'retryable')"
+}
+
 fn count_pending_readmes(conn: &Connection) -> AppResult<i64> {
-    let count: i64 = conn.query_row(
-        "SELECT COUNT(*) FROM repos WHERE readme_excerpt IS NULL AND unstarred = 0",
-        [],
-        |row| row.get(0),
-    )?;
+    let sql = format!("SELECT COUNT(*) FROM repos WHERE {}", pending_readme_sql());
+    let count: i64 = conn.query_row(&sql, [], |row| row.get(0))?;
     Ok(count)
 }
 
 fn load_pending_readmes(conn: &Connection) -> AppResult<Vec<(i64, String, String)>> {
-    let mut stmt = conn.prepare(
+    let sql = format!(
         "SELECT id, owner, name FROM repos
-         WHERE readme_excerpt IS NULL AND unstarred = 0
+         WHERE {}
          ORDER BY id",
-    )?;
+        pending_readme_sql()
+    );
+    let mut stmt = conn.prepare(&sql)?;
     let rows = stmt.query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))?;
     let mut out = Vec::new();
     for row in rows {
@@ -532,6 +704,11 @@ async fn fetch_readme_queue(app: &AppHandle, client: &GitHubClient) -> AppResult
             Err(e) => {
                 let finished = now_rfc3339();
                 let msg = e.message.clone();
+                let status = if e.is_cancelled() {
+                    "cancelled"
+                } else {
+                    "error"
+                };
                 let _ = with_db(app, |conn| {
                     finish_sync_log(
                         conn,
@@ -542,7 +719,7 @@ async fn fetch_readme_queue(app: &AppHandle, client: &GitHubClient) -> AppResult
                             updated: total_fetched,
                             removed: 0,
                         },
-                        "error",
+                        status,
                         Some(&msg),
                     )
                 });
@@ -597,7 +774,6 @@ async fn fetch_readme_batch(
     let total = pending.len() as u32;
     let completed = AtomicU32::new(0);
     let fetched = AtomicI64::new(0);
-    let skipped = AtomicI64::new(0);
     let stop = AtomicBool::new(false);
     let pause_error: Mutex<Option<AppError>> = Mutex::new(None);
     let limiter = Mutex::new(
@@ -612,7 +788,6 @@ async fn fetch_readme_batch(
             let app = app.clone();
             let completed = &completed;
             let fetched = &fetched;
-            let skipped = &skipped;
             let stop = &stop;
             let pause_error = &pause_error;
             let limiter = &limiter;
@@ -621,18 +796,35 @@ async fn fetch_readme_batch(
                 if stop.load(Ordering::SeqCst) {
                     return;
                 }
+                if app.state::<SyncState>().cancel_readme.is_cancelled() {
+                    stop.store(true, Ordering::SeqCst);
+                    let mut slot = pause_error.lock().await;
+                    if slot.is_none() {
+                        *slot = Some(AppError::cancelled("README queue cancelled"));
+                    }
+                    return;
+                }
 
                 acquire_rate_slot(limiter, README_MIN_INTERVAL).await;
 
                 if stop.load(Ordering::SeqCst) {
                     return;
                 }
+                if app.state::<SyncState>().cancel_readme.is_cancelled() {
+                    stop.store(true, Ordering::SeqCst);
+                    let mut slot = pause_error.lock().await;
+                    if slot.is_none() {
+                        *slot = Some(AppError::cancelled("README queue cancelled"));
+                    }
+                    return;
+                }
 
-                // Soft-fail most errors: mark empty so the queue advances.
+                // Confirmed 404 → empty excerpt + status=missing (do not retry).
+                // Transient/5xx → leave excerpt NULL, status=retryable (Resume picks up).
                 // Hard-pause only on rate limits so Resume can retry remaining NULLs.
-                let (excerpt, soft_failed) = match client.fetch_readme(&owner, &name).await {
-                    Ok(Some(text)) => (text, false),
-                    Ok(None) => (String::new(), false),
+                let write = match client.fetch_readme(&owner, &name).await {
+                    Ok(ReadmeFetch::Excerpt(text)) => Some((text, "ok", None::<String>)),
+                    Ok(ReadmeFetch::NotFound) => Some((String::new(), "missing", None)),
                     Err(e) if is_rate_limit_error(&e) => {
                         stop.store(true, Ordering::SeqCst);
                         let mut slot = pause_error.lock().await;
@@ -641,15 +833,40 @@ async fn fetch_readme_batch(
                         }
                         return;
                     }
-                    Err(_) => (String::new(), true),
+                    Err(e) => {
+                        if let Err(db_err) =
+                            with_db(&app, |conn| mark_readme_retryable(conn, id, &e.message))
+                        {
+                            stop.store(true, Ordering::SeqCst);
+                            let mut slot = pause_error.lock().await;
+                            if slot.is_none() {
+                                *slot = Some(db_err);
+                            }
+                        } else {
+                            let current = completed.fetch_add(1, Ordering::SeqCst) + 1;
+                            emit_progress(
+                                &app,
+                                progress(
+                                    "readme",
+                                    current,
+                                    total,
+                                    format!(
+                                        "README {current}/{total}: {owner}/{name} (retry later)"
+                                    ),
+                                    None,
+                                ),
+                            );
+                        }
+                        return;
+                    }
+                };
+
+                let Some((excerpt, status, _err)) = write else {
+                    return;
                 };
 
                 if let Err(e) = with_db(&app, |conn| {
-                    conn.execute(
-                        "UPDATE repos SET readme_excerpt = ?1 WHERE id = ?2",
-                        params![excerpt, id],
-                    )?;
-                    Ok(())
+                    store_readme_excerpt(conn, id, &excerpt, status)
                 }) {
                     // DB errors are local — pause so we don't lose the queue.
                     stop.store(true, Ordering::SeqCst);
@@ -661,12 +878,9 @@ async fn fetch_readme_batch(
                 }
 
                 fetched.fetch_add(1, Ordering::SeqCst);
-                if soft_failed {
-                    skipped.fetch_add(1, Ordering::SeqCst);
-                }
                 let current = completed.fetch_add(1, Ordering::SeqCst) + 1;
-                let note = if soft_failed {
-                    format!("README {current}/{total}: {owner}/{name} (unavailable, skipped)")
+                let note = if status == "missing" {
+                    format!("README {current}/{total}: {owner}/{name} (no README)")
                 } else {
                     format!("README {current}/{total}: {owner}/{name}")
                 };
@@ -680,6 +894,47 @@ async fn fetch_readme_batch(
     }
 
     Ok(fetched.load(Ordering::SeqCst))
+}
+
+fn store_readme_excerpt(
+    conn: &Connection,
+    repo_id: i64,
+    excerpt: &str,
+    status: &str,
+) -> AppResult<()> {
+    let (full_name, description, topics): (String, Option<String>, String) = conn.query_row(
+        "SELECT full_name, description, topics FROM repos WHERE id = ?1",
+        [repo_id],
+        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+    )?;
+    let hash = crate::services::embed::content_hash(&crate::services::embed::build_document(
+        &full_name,
+        description.as_deref(),
+        &topics,
+        Some(excerpt),
+    ));
+    conn.execute(
+        "UPDATE repos SET
+            readme_excerpt = ?1,
+            readme_status = ?2,
+            readme_last_error = NULL,
+            document_hash = ?3
+         WHERE id = ?4",
+        params![excerpt, status, hash, repo_id],
+    )?;
+    Ok(())
+}
+
+fn mark_readme_retryable(conn: &Connection, repo_id: i64, error: &str) -> AppResult<()> {
+    conn.execute(
+        "UPDATE repos SET
+            readme_status = 'retryable',
+            readme_attempts = COALESCE(readme_attempts, 0) + 1,
+            readme_last_error = ?1
+         WHERE id = ?2",
+        params![error, repo_id],
+    )?;
+    Ok(())
 }
 
 fn begin_sync_log(conn: &Connection, kind: &str, started_at: &str) -> AppResult<i64> {
@@ -855,5 +1110,138 @@ mod tests {
         acquire_rate_slot(&limiter, interval).await;
         acquire_rate_slot(&limiter, interval).await;
         assert!(start.elapsed() >= Duration::from_millis(80));
+    }
+
+    #[test]
+    fn etag_is_not_advanced_when_transactional_apply_fails() {
+        let conn = test_conn();
+        settings::set_value(&conn, KEY_STARRED_ETAG, "old-etag").expect("seed etag");
+        let err = store::with_tx(&conn, |tx| {
+            apply_full_diff(tx, &[sample_repo(1, "a", "2024-01-01T00:00:00Z")])?;
+            settings::set_value(tx, KEY_STARRED_ETAG, "new-etag")?;
+            Err::<(), _>(AppError::db("injected apply failure"))
+        })
+        .expect_err("fail");
+        assert_eq!(err.message, "injected apply failure");
+        let etag = settings::get_value(&conn, KEY_STARRED_ETAG)
+            .expect("get")
+            .expect("etag");
+        assert_eq!(etag, "old-etag");
+        let count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM repos", [], |r| r.get(0))
+            .expect("count");
+        assert_eq!(count, 0);
+    }
+
+    #[test]
+    fn commit_full_apply_persists_etag_and_reconcile_time() {
+        let conn = test_conn();
+        let stats = commit_full_apply(
+            &conn,
+            &[sample_repo(1, "a", "2024-01-01T00:00:00Z")],
+            Some("\"etag-ok\""),
+        )
+        .expect("commit");
+        assert_eq!(stats.added, 1);
+        assert_eq!(
+            settings::get_value(&conn, KEY_STARRED_ETAG)
+                .expect("etag")
+                .as_deref(),
+            Some("\"etag-ok\"")
+        );
+        assert!(settings::get_value(&conn, KEY_LAST_FULL_RECONCILE_AT)
+            .expect("reconcile")
+            .is_some());
+        assert_eq!(
+            settings::get_value(&conn, KEY_INCREMENTAL_SINCE_RECONCILE)
+                .expect("count")
+                .as_deref(),
+            Some("0")
+        );
+    }
+
+    #[test]
+    fn incremental_apply_never_marks_unstars() {
+        let conn = test_conn();
+        apply_full_diff(
+            &conn,
+            &[
+                sample_repo(1, "a", "2024-01-01T00:00:00Z"),
+                sample_repo(2, "b", "2024-01-02T00:00:00Z"),
+            ],
+        )
+        .expect("seed");
+        let stats = commit_incremental_apply(
+            &conn,
+            &[sample_repo(1, "a", "2024-01-01T00:00:00Z")],
+            Some("\"inc\""),
+        )
+        .expect("inc");
+        assert_eq!(stats.removed, 0);
+        let unstarred: i64 = conn
+            .query_row("SELECT unstarred FROM repos WHERE id = 2", [], |r| r.get(0))
+            .expect("row");
+        assert_eq!(unstarred, 0, "incremental must not claim unstar detection");
+        assert_eq!(
+            settings::get_value(&conn, KEY_INCREMENTAL_SINCE_RECONCILE)
+                .expect("n")
+                .as_deref(),
+            Some("1")
+        );
+    }
+
+    #[test]
+    fn reconcile_due_after_seven_incrementals() {
+        let conn = test_conn();
+        settings::set_value(&conn, KEY_LAST_FULL_RECONCILE_AT, &now_rfc3339()).expect("rec");
+        settings::set_value(&conn, KEY_INCREMENTAL_SINCE_RECONCILE, "7").expect("n");
+        assert!(reconcile_due(&conn).expect("due"));
+        settings::set_value(&conn, KEY_INCREMENTAL_SINCE_RECONCILE, "1").expect("n");
+        assert!(!reconcile_due(&conn).expect("not due"));
+    }
+
+    #[test]
+    fn readme_pending_includes_retryable_not_missing() {
+        let conn = test_conn();
+        apply_full_diff(&conn, &[sample_repo(1, "a", "2024-01-01T00:00:00Z")]).expect("seed");
+        assert_eq!(count_pending_readmes(&conn).expect("pending"), 1);
+
+        store_readme_excerpt(&conn, 1, "", "missing").expect("404");
+        assert_eq!(count_pending_readmes(&conn).expect("missing"), 0);
+
+        conn.execute(
+            "UPDATE repos SET readme_excerpt = NULL, readme_status = NULL WHERE id = 1",
+            [],
+        )
+        .expect("reset");
+        mark_readme_retryable(&conn, 1, "HTTP 503: unavailable").expect("retry");
+        assert_eq!(count_pending_readmes(&conn).expect("retryable"), 1);
+        let status: String = conn
+            .query_row("SELECT readme_status FROM repos WHERE id = 1", [], |r| {
+                r.get(0)
+            })
+            .expect("status");
+        assert_eq!(status, "retryable");
+    }
+
+    #[test]
+    fn cancel_flag_finishes_sync_log_as_cancelled() {
+        let conn = test_conn();
+        let id = begin_sync_log(&conn, "full", "2024-01-01T00:00:00Z").expect("begin");
+        finish_sync_log(
+            &conn,
+            id,
+            "2024-01-01T00:00:01Z",
+            &DiffStats::default(),
+            "cancelled",
+            Some("operation cancelled"),
+        )
+        .expect("finish");
+        let status: String = conn
+            .query_row("SELECT status FROM sync_log WHERE id = ?1", [id], |r| {
+                r.get(0)
+            })
+            .expect("status");
+        assert_eq!(status, "cancelled");
     }
 }

@@ -1,4 +1,4 @@
-import { useQuery } from "@tanstack/react-query";
+import { useInfiniteQuery } from "@tanstack/react-query";
 import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { CategoryTree } from "@/components/library/CategoryTree";
 import { LibraryToolbar } from "@/components/library/LibraryToolbar";
@@ -6,7 +6,9 @@ import { RepoDetailPanel } from "@/components/library/RepoDetailPanel";
 import { RepoVirtualList } from "@/components/library/RepoVirtualList";
 import { listRepos, searchRepos } from "@/lib/tauri";
 import { useUiStore } from "@/store/ui";
-import type { RepoFilters } from "@/types";
+import type { RepoFilters, RepoListResult } from "@/types";
+
+export const LIBRARY_PAGE_SIZE = 100;
 
 function useDebouncedValue<T>(value: T, ms: number): T {
   const [debounced, setDebounced] = useState(value);
@@ -48,16 +50,19 @@ export function LibraryView() {
     [hideUnstarred, hideArchived, language, topic, categoryId],
   );
 
-  const reposQuery = useQuery({
+  const reposQuery = useInfiniteQuery({
     queryKey: ["repos", deferredQuery, filters, sort, sortDesc, searchMode],
-    queryFn: async () => {
+    initialPageParam: 0,
+    queryFn: async ({ pageParam }) => {
       const started = performance.now();
-      const result =
+      const result: RepoListResult =
         deferredQuery.trim().length === 0
           ? await listRepos({
               filters,
               sort,
               sortDesc,
+              limit: LIBRARY_PAGE_SIZE,
+              offset: pageParam,
             })
           : await searchRepos({
               query: deferredQuery,
@@ -65,6 +70,8 @@ export function LibraryView() {
               sort,
               sortDesc,
               mode: searchMode,
+              limit: LIBRARY_PAGE_SIZE,
+              offset: pageParam,
             });
       if (import.meta.env.DEV) {
         console.debug(
@@ -76,11 +83,18 @@ export function LibraryView() {
       }
       return result;
     },
+    getNextPageParam: (lastPage, pages) => {
+      const loaded = pages.reduce((n, p) => n + p.items.length, 0);
+      return loaded < lastPage.total ? loaded : undefined;
+    },
   });
 
-  const items = reposQuery.data?.items ?? [];
-  const total = reposQuery.data?.total ?? 0;
-  const searchHint = reposQuery.data?.hint ?? null;
+  const items = useMemo(
+    () => reposQuery.data?.pages.flatMap((p) => p.items) ?? [],
+    [reposQuery.data],
+  );
+  const total = reposQuery.data?.pages[0]?.total ?? 0;
+  const searchHint = reposQuery.data?.pages[0]?.hint ?? null;
 
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
@@ -123,6 +137,13 @@ export function LibraryView() {
         let next = idx;
         if (e.key === "ArrowDown") {
           next = idx < 0 ? 0 : Math.min(items.length - 1, idx + 1);
+          if (
+            next === items.length - 1 &&
+            reposQuery.hasNextPage &&
+            !reposQuery.isFetchingNextPage
+          ) {
+            void reposQuery.fetchNextPage();
+          }
         } else {
           next = idx < 0 ? 0 : Math.max(0, idx - 1);
         }
@@ -132,7 +153,15 @@ export function LibraryView() {
 
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [items, selectedRepoId, setSelectedRepoId, query, setQuery, clearFilters]);
+  }, [
+    items,
+    selectedRepoId,
+    setSelectedRepoId,
+    query,
+    setQuery,
+    clearFilters,
+    reposQuery,
+  ]);
 
   return (
     <div className="flex h-[calc(100vh-7.5rem)] min-h-0">
@@ -160,6 +189,11 @@ export function LibraryView() {
               layout={layout}
               selectedId={selectedRepoId}
               onSelect={setSelectedRepoId}
+              onEndReached={() => {
+                if (reposQuery.hasNextPage && !reposQuery.isFetchingNextPage) {
+                  void reposQuery.fetchNextPage();
+                }
+              }}
             />
           )}
         </div>

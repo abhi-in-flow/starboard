@@ -11,32 +11,14 @@ pub fn get_system_status(conn: &Connection) -> AppResult<SystemStatus> {
     Ok(SystemStatus {
         embeddings: embeddings_panel(conn)?,
         categorization: categorization_panel(conn)?,
+        integrity: None,
     })
 }
 
 fn embeddings_panel(conn: &Connection) -> AppResult<EmbeddingsPanel> {
     let app_settings = settings::get_settings(conn)?;
-    let total_repos: i64 = conn.query_row(
-        "SELECT COUNT(*) FROM repos WHERE unstarred = 0",
-        [],
-        |row| row.get(0),
-    )?;
-    let embedded_repos: i64 = conn.query_row(
-        "SELECT COUNT(*) FROM repo_embedding_meta m
-         JOIN repos r ON r.id = m.repo_id
-         WHERE r.unstarred = 0",
-        [],
-        |row| row.get(0),
-    )?;
-    let missing_repos: i64 = conn.query_row(
-        "SELECT COUNT(*) FROM repos r
-         LEFT JOIN repo_embedding_meta m ON m.repo_id = r.id
-         WHERE r.unstarred = 0 AND m.repo_id IS NULL",
-        [],
-        |row| row.get(0),
-    )?;
-    let stale_or_missing = embed::list_stale_or_missing(conn)?.len() as i64;
-    let stale_repos = (stale_or_missing - missing_repos).max(0);
+    let (total_repos, embedded_repos, missing_repos, stale_repos) =
+        embed::embed_coverage_counts(conn)?;
     let coverage = if total_repos == 0 {
         0.0
     } else {
@@ -176,16 +158,19 @@ mod tests {
         let dim = 768_i64;
         let emb = vec![0.1_f32; dim as usize];
         // Repo 1: fresh embedding (hash must match embed::build_document)
-        upsert_embedding(
-            &conn,
-            1,
-            &emb,
-            &content_hash("owner/a\ndesc\nTopics: []\n"),
-            "nomic-embed-text",
-            dim,
+        let hash_a = content_hash("owner/a\ndesc\nTopics: []\n");
+        conn.execute(
+            "UPDATE repos SET document_hash = ?1 WHERE id = 1",
+            rusqlite::params![hash_a],
         )
-        .expect("embed 1");
+        .expect("hash a");
+        upsert_embedding(&conn, 1, &emb, &hash_a, "nomic-embed-text", dim).expect("embed 1");
         // Repo 2: stale embedding (wrong hash)
+        conn.execute(
+            "UPDATE repos SET document_hash = 'fresh-hash' WHERE id = 2",
+            [],
+        )
+        .expect("hash b");
         upsert_embedding(&conn, 2, &emb, "stale-hash", "nomic-embed-text", dim).expect("embed 2");
         // Repo 3: missing
 

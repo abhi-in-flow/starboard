@@ -5,8 +5,8 @@ use crate::models::{
     CategoryNode, LibraryFacets, ListReposRequest, RepoDetail, RepoFilters, RepoListResult,
     SearchReposRequest,
 };
-use crate::services::{categories, repos, search};
 use crate::services::store::{self, DbState};
+use crate::services::{categories, repos, search};
 
 #[tauri::command]
 pub fn list_repos(
