@@ -2,13 +2,13 @@ use rusqlite::Connection;
 
 use crate::error::AppResult;
 use crate::models::SetupStatus;
-use crate::services::settings::{self, KEY_GITHUB_USERNAME, KEY_LAST_SYNCED_AT};
+use crate::services::settings::{self, KEY_LAST_SYNCED_AT};
 
 /// Aggregate first-run checklist truth from SQLite + caller-supplied PAT presence.
 /// `pat_present` comes from the keyring (same source as `get_auth_status`).
 pub fn get_setup_status(conn: &Connection, pat_present: bool) -> AppResult<SetupStatus> {
     let app_settings = settings::get_settings(conn)?;
-    let github_username = settings::get_value(conn, KEY_GITHUB_USERNAME)?;
+    let github_username = app_settings.github_username.clone();
     let github_connected = pat_present && github_username.is_some();
     let last_synced_at = settings::get_value(conn, KEY_LAST_SYNCED_AT)?;
 
