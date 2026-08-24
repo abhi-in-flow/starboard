@@ -25,6 +25,7 @@ import {
   startAssignment,
   updateTaxonomy,
 } from "@/lib/tauri";
+import { useUiStore } from "@/store/ui";
 import type {
   AppError,
   CategorizeProgress,
@@ -137,6 +138,8 @@ function toTaxonomyEdit(cats: DraftCat[]): TaxonomyEdit {
 
 export function CategoriesView() {
   const queryClient = useQueryClient();
+  const categoriesSection = useUiStore((s) => s.categoriesSection);
+  const setCategoriesSection = useUiStore((s) => s.setCategoriesSection);
   const [draft, setDraft] = useState<DraftCat[] | null>(null);
   const [editorMode, setEditorMode] = useState<EditorMode>("create");
   const [progress, setProgress] = useState<CategorizeProgress | null>(null);
@@ -169,12 +172,27 @@ export function CategoriesView() {
         void queryClient.invalidateQueries({ queryKey: ["categories"] });
         void queryClient.invalidateQueries({ queryKey: ["repos"] });
         void queryClient.invalidateQueries({ queryKey: ["repo"] });
+        void queryClient.invalidateQueries({ queryKey: ["setupStatus"] });
       }
     }).then((fn) => {
       unlisten = fn;
     });
     return () => unlisten?.();
   }, [queryClient]);
+
+  useEffect(() => {
+    if (!categoriesSection) {
+      return;
+    }
+    const id =
+      categoriesSection === "taxonomy"
+        ? "categories-taxonomy"
+        : "categories-assign";
+    document
+      .getElementById(id)
+      ?.scrollIntoView({ behavior: "smooth", block: "start" });
+    setCategoriesSection(null);
+  }, [categoriesSection, setCategoriesSection]);
 
   const generateMutation = useMutation({
     mutationFn: generateTaxonomy,
@@ -209,6 +227,7 @@ export function CategoriesView() {
       setDraft(null);
       setEditorMode("create");
       void queryClient.invalidateQueries({ queryKey: ["categories"] });
+      void queryClient.invalidateQueries({ queryKey: ["setupStatus"] });
     },
     onError: (err) => setActionError(errorMessage(err)),
   });
@@ -222,6 +241,7 @@ export function CategoriesView() {
       void queryClient.invalidateQueries({ queryKey: ["categories"] });
       void queryClient.invalidateQueries({ queryKey: ["repos"] });
       void queryClient.invalidateQueries({ queryKey: ["repo"] });
+      void queryClient.invalidateQueries({ queryKey: ["setupStatus"] });
     },
     onError: (err) => setActionError(errorMessage(err)),
   });
@@ -238,6 +258,7 @@ export function CategoriesView() {
         message: "Starting assignment…",
       });
       void queryClient.invalidateQueries({ queryKey: ["categorizeStatus"] });
+      void queryClient.invalidateQueries({ queryKey: ["setupStatus"] });
     },
     onError: (err) => {
       const message = errorMessage(err);
@@ -409,7 +430,7 @@ export function CategoriesView() {
         </p>
       ) : null}
 
-      <Card>
+      <Card id="categories-taxonomy">
         <CardHeader>
           <CardTitle className="text-base">1. Taxonomy</CardTitle>
           <CardDescription>
@@ -569,7 +590,7 @@ export function CategoriesView() {
         </CardContent>
       </Card>
 
-      <Card>
+      <Card id="categories-assign">
         <CardHeader>
           <CardTitle className="text-base">2. Assign repos</CardTitle>
           <CardDescription>

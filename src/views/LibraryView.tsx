@@ -1,10 +1,12 @@
-import { useInfiniteQuery } from "@tanstack/react-query";
+import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
 import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { CategoryTree } from "@/components/library/CategoryTree";
 import { LibraryToolbar } from "@/components/library/LibraryToolbar";
 import { RepoDetailPanel } from "@/components/library/RepoDetailPanel";
 import { RepoVirtualList } from "@/components/library/RepoVirtualList";
-import { listRepos, searchRepos } from "@/lib/tauri";
+import { OnboardingGuide } from "@/components/OnboardingGuide";
+import { onboardingSurface } from "@/lib/onboarding";
+import { getSetupStatus, listRepos, searchRepos } from "@/lib/tauri";
 import { useUiStore } from "@/store/ui";
 import type { RepoFilters, RepoListResult } from "@/types";
 
@@ -38,6 +40,16 @@ export function LibraryView() {
   const setSelectedRepoId = useUiStore((s) => s.setSelectedRepoId);
   const setQuery = useUiStore((s) => s.setQuery);
   const clearFilters = useUiStore((s) => s.clearFilters);
+
+  const setupQuery = useQuery({
+    queryKey: ["setupStatus"],
+    queryFn: getSetupStatus,
+  });
+  const surface = setupQuery.data
+    ? onboardingSurface(setupQuery.data)
+    : setupQuery.isLoading
+      ? "hidden"
+      : "full";
 
   const filters: RepoFilters = useMemo(
     () => ({
@@ -163,44 +175,55 @@ export function LibraryView() {
     reposQuery,
   ]);
 
+  if (surface === "full") {
+    return (
+      <div className="min-h-[calc(100vh-7.5rem)]">
+        <OnboardingGuide variant="full" />
+      </div>
+    );
+  }
+
   return (
-    <div className="flex h-[calc(100vh-7.5rem)] min-h-0">
-      <div className="hidden w-52 shrink-0 md:block">
-        <CategoryTree />
-      </div>
-      <div className="flex min-w-0 flex-1 flex-col">
-        <LibraryToolbar
-          searchRef={searchRef}
-          total={total}
-          searchHint={searchHint}
-        />
-        <div className="min-h-0 flex-1">
-          {reposQuery.isLoading ? (
-            <div className="flex h-40 items-center justify-center text-sm text-muted-foreground">
-              Loading library…
-            </div>
-          ) : reposQuery.isError ? (
-            <div className="flex h-40 items-center justify-center text-sm text-destructive">
-              Failed to load repositories.
-            </div>
-          ) : (
-            <RepoVirtualList
-              items={items}
-              layout={layout}
-              selectedId={selectedRepoId}
-              onSelect={setSelectedRepoId}
-              onEndReached={() => {
-                if (reposQuery.hasNextPage && !reposQuery.isFetchingNextPage) {
-                  void reposQuery.fetchNextPage();
-                }
-              }}
-            />
-          )}
+    <div className="flex h-[calc(100vh-7.5rem)] min-h-0 flex-col">
+      {surface === "banner" ? <OnboardingGuide variant="banner" /> : null}
+      <div className="flex min-h-0 flex-1">
+        <div className="hidden w-52 shrink-0 md:block">
+          <CategoryTree />
         </div>
+        <div className="flex min-w-0 flex-1 flex-col">
+          <LibraryToolbar
+            searchRef={searchRef}
+            total={total}
+            searchHint={searchHint}
+          />
+          <div className="min-h-0 flex-1">
+            {reposQuery.isLoading || setupQuery.isLoading ? (
+              <div className="flex h-40 items-center justify-center text-sm text-muted-foreground">
+                Loading library…
+              </div>
+            ) : reposQuery.isError ? (
+              <div className="flex h-40 items-center justify-center text-sm text-destructive">
+                Failed to load repositories.
+              </div>
+            ) : (
+              <RepoVirtualList
+                items={items}
+                layout={layout}
+                selectedId={selectedRepoId}
+                onSelect={setSelectedRepoId}
+                onEndReached={() => {
+                  if (reposQuery.hasNextPage && !reposQuery.isFetchingNextPage) {
+                    void reposQuery.fetchNextPage();
+                  }
+                }}
+              />
+            )}
+          </div>
+        </div>
+        {selectedRepoId != null ? (
+          <RepoDetailPanel repoId={selectedRepoId} />
+        ) : null}
       </div>
-      {selectedRepoId != null ? (
-        <RepoDetailPanel repoId={selectedRepoId} />
-      ) : null}
     </div>
   );
 }

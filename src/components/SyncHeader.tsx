@@ -15,6 +15,7 @@ import {
   resumeReadmeQueue,
   startSync,
 } from "@/lib/tauri";
+import { useUiStore } from "@/store/ui";
 import type { SyncProgress } from "@/types";
 
 function formatRelative(iso: string | null | undefined): string {
@@ -43,6 +44,7 @@ function formatRelative(iso: string | null | undefined): string {
 
 export function SyncHeader() {
   const queryClient = useQueryClient();
+  const openSettings = useUiStore((s) => s.openSettings);
   const [progress, setProgress] = useState<SyncProgress | null>(null);
   const [syncError, setSyncError] = useState<string | null>(null);
   const [syncNotice, setSyncNotice] = useState<string | null>(null);
@@ -110,6 +112,8 @@ export function SyncHeader() {
     },
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["syncStatus"] });
+      void queryClient.invalidateQueries({ queryKey: ["setupStatus"] });
+      void queryClient.invalidateQueries({ queryKey: ["repos"] });
     },
     onError: (err) => {
       const outcome = classifyJobFailure(err, "Sync failed");
@@ -299,7 +303,14 @@ export function SyncHeader() {
       ) : null}
       {!connected ? (
         <p className="text-xs text-muted-foreground">
-          Connect a GitHub token in Settings to sync starred repos.
+          <button
+            type="button"
+            className="underline-offset-2 hover:underline"
+            onClick={() => openSettings("github")}
+          >
+            Connect a GitHub token
+          </button>{" "}
+          in Settings to sync starred repos.
         </p>
       ) : null}
     </header>

@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -20,9 +20,11 @@ import {
   getSettings,
   getSystemStatus,
   rebuildEmbeddingsTable,
+  setOnboardingCompleted,
   updateSettings,
 } from "@/lib/tauri";
 import { cn } from "@/lib/utils";
+import { useUiStore } from "@/store/ui";
 import type { AppError, CategoryNode, IntegrityReport } from "@/types";
 
 function errorMessage(err: unknown): string {
@@ -231,7 +233,11 @@ function StatusTab() {
 
 export function SettingsView() {
   const queryClient = useQueryClient();
-  const [tab, setTab] = useState<"general" | "status">("general");
+  const tab = useUiStore((s) => s.settingsTab);
+  const setTab = useUiStore((s) => s.setSettingsTab);
+  const settingsSection = useUiStore((s) => s.settingsSection);
+  const setSettingsSection = useUiStore((s) => s.setSettingsSection);
+  const setView = useUiStore((s) => s.setView);
   const [pat, setPat] = useState("");
   const [replacingToken, setReplacingToken] = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
@@ -268,6 +274,7 @@ export function SettingsView() {
       setAuthError(null);
       queryClient.setQueryData(["authStatus"], status);
       void queryClient.invalidateQueries({ queryKey: ["settings"] });
+      void queryClient.invalidateQueries({ queryKey: ["setupStatus"] });
     },
     onError: (err) => {
       setAuthError(errorMessage(err));
@@ -281,6 +288,7 @@ export function SettingsView() {
       setReplacingToken(false);
       queryClient.setQueryData(["authStatus"], status);
       void queryClient.invalidateQueries({ queryKey: ["settings"] });
+      void queryClient.invalidateQueries({ queryKey: ["setupStatus"] });
     },
     onError: (err) => {
       setAuthError(errorMessage(err));
@@ -305,6 +313,7 @@ export function SettingsView() {
       window.setTimeout(() => setSettingsSaved(false), 2000);
       void queryClient.invalidateQueries({ queryKey: ["embedStatus"] });
       void queryClient.invalidateQueries({ queryKey: ["systemStatus"] });
+      void queryClient.invalidateQueries({ queryKey: ["setupStatus"] });
     },
   });
 
@@ -319,8 +328,37 @@ export function SettingsView() {
       queryClient.setQueryData(["settings"], settings);
       void queryClient.invalidateQueries({ queryKey: ["embedStatus"] });
       void queryClient.invalidateQueries({ queryKey: ["systemStatus"] });
+      void queryClient.invalidateQueries({ queryKey: ["setupStatus"] });
     },
   });
+
+  const reopenGuideMutation = useMutation({
+    mutationFn: () => setOnboardingCompleted(false),
+    onSuccess: (status) => {
+      queryClient.setQueryData(["setupStatus"], status);
+      setView("library");
+    },
+  });
+
+  useEffect(() => {
+    if (!settingsSection) {
+      return;
+    }
+    const id =
+      settingsSection === "github" ? "settings-github" : "settings-ollama";
+    const section = document.getElementById(id);
+    section?.scrollIntoView({ behavior: "smooth", block: "start" });
+    if (settingsSection === "github") {
+      window.setTimeout(() => {
+        document.getElementById("pat")?.focus();
+      }, 80);
+    } else {
+      window.setTimeout(() => {
+        document.getElementById("ollama-url")?.focus();
+      }, 80);
+    }
+    setSettingsSection(null);
+  }, [settingsSection, setSettingsSection]);
 
   const auth = authQuery.data;
   const showPatForm = !auth?.connected || replacingToken;
@@ -363,7 +401,7 @@ export function SettingsView() {
         <StatusTab />
       ) : (
         <>
-          <Card>
+          <Card id="settings-github" tabIndex={-1} className="outline-none">
             <CardHeader>
               <CardTitle>GitHub</CardTitle>
               <CardDescription>
@@ -463,7 +501,7 @@ export function SettingsView() {
             </CardContent>
           </Card>
 
-          <Card>
+          <Card id="settings-ollama" tabIndex={-1} className="outline-none">
             <CardHeader>
               <CardTitle>Ollama</CardTitle>
               <CardDescription>
@@ -591,6 +629,26 @@ export function SettingsView() {
                   </div>
                 </form>
               )}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>Setup guide</CardTitle>
+              <CardDescription>
+                Reopen the first-run checklist. Progress comes from your
+                current GitHub, sync, category, and embedding status.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <Button
+                type="button"
+                variant="outline"
+                disabled={reopenGuideMutation.isPending}
+                onClick={() => reopenGuideMutation.mutate()}
+              >
+                Run setup guide again
+              </Button>
             </CardContent>
           </Card>
         </>
