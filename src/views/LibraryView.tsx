@@ -1,18 +1,28 @@
-import { useInfiniteQuery, useQuery } from "@tanstack/react-query";
+import {
+  useInfiniteQuery,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query";
 import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { CategoryTree } from "@/components/library/CategoryTree";
+import { LibraryEmptyState } from "@/components/library/LibraryEmptyState";
 import { LibraryToolbar } from "@/components/library/LibraryToolbar";
 import { RepoDetailPanel } from "@/components/library/RepoDetailPanel";
 import { RepoVirtualList } from "@/components/library/RepoVirtualList";
 import { OnboardingGuide } from "@/components/OnboardingGuide";
+import { nextEscapeAction } from "@/lib/keyboard";
+import { selectEmptyState } from "@/lib/libraryEmpty";
+import { hasClearableLibraryState } from "@/lib/libraryFilters";
 import { onboardingSurface } from "@/lib/onboarding";
-import { isYoungLibrary, reviewPresetMeta } from "@/lib/review";
+import { reviewPresetMeta } from "@/lib/review";
 import {
   getReviewCounts,
   getSetupStatus,
   listRepos,
   searchRepos,
+  startSync,
 } from "@/lib/tauri";
+import { useDockedDetail, useWideLayout } from "@/lib/useMediaQuery";
 import { useUiStore } from "@/store/ui";
 import type { RepoFilters, RepoListResult } from "@/types";
 
@@ -29,6 +39,11 @@ function useDebouncedValue<T>(value: T, ms: number): T {
 
 export function LibraryView() {
   const searchRef = useRef<HTMLInputElement>(null);
+  const queryClient = useQueryClient();
+  const wide = useWideLayout();
+  const dockedDetail = useDockedDetail();
+  const pendingAdvance = useRef(false);
+
   const query = useUiStore((s) => s.query);
   const debouncedQuery = useDebouncedValue(query, 150);
   const deferredQuery = useDeferredValue(debouncedQuery);
@@ -43,11 +58,11 @@ export function LibraryView() {
   const topic = useUiStore((s) => s.topic);
   const categoryId = useUiStore((s) => s.categoryId);
   const reviewPreset = useUiStore((s) => s.reviewPreset);
-  const setReviewPreset = useUiStore((s) => s.setReviewPreset);
   const selectedRepoId = useUiStore((s) => s.selectedRepoId);
   const setSelectedRepoId = useUiStore((s) => s.setSelectedRepoId);
   const setQuery = useUiStore((s) => s.setQuery);
   const clearFilters = useUiStore((s) => s.clearFilters);
+  const openSettings = useUiStore((s) => s.openSettings);
 
   const setupQuery = useQuery({
     queryKey: ["setupStatus"],
@@ -55,9 +70,7 @@ export function LibraryView() {
   });
   const surface = setupQuery.data
     ? onboardingSurface(setupQuery.data)
-    : setupQuery.isLoading
-      ? "hidden"
-      : "full";
+    : "hidden";
 
   const filters: RepoFilters = useMemo(
     () => ({
@@ -116,48 +129,40 @@ export function LibraryView() {
   );
   const total = reposQuery.data?.pages[0]?.total ?? 0;
   const searchHint = reposQuery.data?.pages[0]?.hint ?? null;
+  const modeUsed = reposQuery.data?.pages[0]?.modeUsed;
 
   const reviewCounts = useQuery({
     queryKey: ["reviewCounts"],
     queryFn: getReviewCounts,
   });
 
-  const extraFilters = language != null || topic != null || categoryId != null;
-  const emptyMessage = useMemo(() => {
-    if (total > 0) {
-      return null;
+  const emptyKind = selectEmptyState({
+    total,
+    loading: reposQuery.isLoading || setupQuery.isLoading,
+    repoError: reposQuery.isError,
+    setupError: setupQuery.isError,
+    onboardingSurface: surface,
+    githubConnected: setupQuery.data?.githubConnected ?? false,
+    lastSyncedAt: setupQuery.data?.lastSyncedAt ?? null,
+    repoCount: setupQuery.data?.repoCount ?? 0,
+    query: deferredQuery,
+    language,
+    topic,
+    categoryId,
+    reviewPreset,
+    reviewCounts: reviewCounts.data ?? null,
+  });
+
+  useEffect(() => {
+    if (!pendingAdvance.current || items.length === 0) {
+      return;
     }
-    const counts = reviewCounts.data;
-    if (!reviewPreset) {
-      return extraFilters || deferredQuery.trim()
-        ? "No repositories match your filters."
-        : "No repositories yet. Sync your GitHub stars to fill the library.";
+    const idx = items.findIndex((r) => r.id === selectedRepoId);
+    if (idx >= 0 && idx < items.length - 1) {
+      setSelectedRepoId(items[idx + 1].id);
+      pendingAdvance.current = false;
     }
-    const meta = reviewPresetMeta(reviewPreset);
-    if (!counts || counts.activeStars === 0) {
-      return "Sync your starred repos first — there is nothing local to review yet. Review never writes stars back to GitHub.";
-    }
-    if (
-      (reviewPreset === "inactive" || reviewPreset === "forgotten") &&
-      isYoungLibrary(
-        counts.activeStars,
-        counts.oldestStarredAt,
-        counts.inactive,
-        counts.forgotten,
-      ) &&
-      !extraFilters &&
-      !deferredQuery.trim()
-    ) {
-      return `Your library is still young. Inactive (no push in 12+ months) and forgotten (starred 24+ months ago, no push in 18+ months) queues fill as repos age.`;
-    }
-    if (extraFilters || deferredQuery.trim()) {
-      return `No repositories match ${meta.label} plus your current search or filters.`;
-    }
-    if (reviewPreset === "unstarred") {
-      return "No previously unstarred repos in local history yet. Unstars are recorded on sync and stay out of active counts.";
-    }
-    return `You're caught up on ${meta.label}. Reviewed and snoozed repos stay out of this queue.`;
-  }, [total, reviewPreset, reviewCounts.data, extraFilters, deferredQuery]);
+  }, [items, selectedRepoId, setSelectedRepoId]);
 
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
@@ -166,6 +171,7 @@ export function LibraryView() {
         target &&
         (target.tagName === "INPUT" ||
           target.tagName === "TEXTAREA" ||
+          target.tagName === "SELECT" ||
           target.isContentEditable);
 
       if (e.key === "/" && !typing) {
@@ -175,19 +181,27 @@ export function LibraryView() {
       }
 
       if (e.key === "Escape") {
-        if (selectedRepoId != null) {
+        const action = nextEscapeAction({
+          detailOpen: selectedRepoId != null,
+          hasQuery: Boolean(query),
+          hasFiltersOrReview: hasClearableLibraryState({
+            language,
+            topic,
+            categoryId,
+            reviewPreset,
+            hideUnstarred,
+            hideArchived,
+            sort,
+            sortDesc,
+          }),
+        });
+        if (action === "close-detail") {
           setSelectedRepoId(null);
-          return;
-        }
-        if (query) {
+        } else if (action === "clear-query") {
           setQuery("");
-          return;
+        } else if (action === "clear-filters") {
+          clearFilters();
         }
-        if (reviewPreset) {
-          setReviewPreset(null);
-          return;
-        }
-        clearFilters();
         return;
       }
 
@@ -197,6 +211,9 @@ export function LibraryView() {
 
       if (e.key === "ArrowDown" || e.key === "ArrowUp") {
         e.preventDefault();
+        document
+          .getElementById("library-repo-listbox")
+          ?.focus({ preventScroll: true });
         if (items.length === 0) {
           return;
         }
@@ -209,6 +226,7 @@ export function LibraryView() {
             reposQuery.hasNextPage &&
             !reposQuery.isFetchingNextPage
           ) {
+            pendingAdvance.current = true;
             void reposQuery.fetchNextPage();
           }
         } else {
@@ -226,49 +244,75 @@ export function LibraryView() {
     setSelectedRepoId,
     query,
     setQuery,
+    language,
+    topic,
+    categoryId,
     reviewPreset,
-    setReviewPreset,
+    hideUnstarred,
+    hideArchived,
+    sort,
+    sortDesc,
     clearFilters,
     reposQuery,
   ]);
 
-  if (surface === "full") {
+  if (emptyKind === "onboarding") {
     return (
-      <div className="min-h-[calc(100vh-7.5rem)]">
+      <div className="flex min-h-0 flex-1 flex-col overflow-auto">
         <OnboardingGuide variant="full" />
       </div>
     );
   }
 
+  const showDetail = selectedRepoId != null;
+  const docked = dockedDetail && showDetail;
+  const overlay = !dockedDetail && showDetail;
+
   return (
-    <div className="flex h-[calc(100vh-7.5rem)] min-h-0 flex-col">
+    <div className="flex min-h-0 flex-1 flex-col">
+      {emptyKind === "setup-error" ? (
+        <div className="shrink-0 border-b border-border px-4 py-3">
+          <LibraryEmptyState
+            kind="setup-error"
+            errorDetail={
+              setupQuery.error &&
+              typeof setupQuery.error === "object" &&
+              "message" in setupQuery.error
+                ? String((setupQuery.error as { message: unknown }).message)
+                : null
+            }
+            onClearFilters={clearFilters}
+            onSync={() => void startSync(false)}
+            onRetry={() => void setupQuery.refetch()}
+            onSettings={() => openSettings("github")}
+          />
+        </div>
+      ) : null}
       {surface === "banner" ? <OnboardingGuide variant="banner" /> : null}
       <div className="flex min-h-0 flex-1">
-        <div className="hidden w-52 shrink-0 md:block">
-          <CategoryTree />
-        </div>
-        <div className="flex min-w-0 flex-1 flex-col">
+        {wide ? (
+          <div className="hidden w-52 shrink-0 md:block">
+            <CategoryTree />
+          </div>
+        ) : null}
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col">
           <LibraryToolbar
             searchRef={searchRef}
             total={total}
             searchHint={searchHint}
+            modeUsed={modeUsed}
           />
           <div className="min-h-0 flex-1">
-            {reposQuery.isLoading || setupQuery.isLoading ? (
+            {emptyKind === "loading" ? (
               <div className="flex h-40 items-center justify-center text-sm text-muted-foreground">
                 Loading library…
               </div>
-            ) : reposQuery.isError ? (
-              <div className="flex h-40 items-center justify-center text-sm text-destructive">
-                Failed to load repositories.
-              </div>
-            ) : (
+            ) : emptyKind === "has-results" || items.length > 0 ? (
               <RepoVirtualList
                 items={items}
                 layout={layout}
                 selectedId={selectedRepoId}
                 onSelect={setSelectedRepoId}
-                emptyMessage={emptyMessage}
                 reviewMode={reviewPreset != null}
                 onEndReached={() => {
                   if (
@@ -279,11 +323,44 @@ export function LibraryView() {
                   }
                 }}
               />
-            )}
+            ) : emptyKind !== "setup-error" ? (
+              <LibraryEmptyState
+                kind={emptyKind}
+                reviewLabel={
+                  reviewPreset
+                    ? reviewPresetMeta(reviewPreset).label
+                    : undefined
+                }
+                onClearFilters={() => {
+                  setQuery("");
+                  clearFilters();
+                }}
+                onSync={() => {
+                  void startSync(false).then(() => {
+                    void queryClient.invalidateQueries({
+                      queryKey: ["syncStatus"],
+                    });
+                    void queryClient.invalidateQueries({
+                      queryKey: ["setupStatus"],
+                    });
+                    void queryClient.invalidateQueries({ queryKey: ["repos"] });
+                  });
+                }}
+                onRetry={() => {
+                  void reposQuery.refetch();
+                  void setupQuery.refetch();
+                }}
+                onSettings={() => openSettings("github")}
+                syncDisabled={!setupQuery.data?.githubConnected}
+              />
+            ) : null}
           </div>
         </div>
-        {selectedRepoId != null ? (
-          <RepoDetailPanel repoId={selectedRepoId} />
+        {docked && selectedRepoId != null ? (
+          <RepoDetailPanel repoId={selectedRepoId} variant="docked" />
+        ) : null}
+        {overlay && selectedRepoId != null ? (
+          <RepoDetailPanel repoId={selectedRepoId} variant="overlay" />
         ) : null}
       </div>
     </div>
