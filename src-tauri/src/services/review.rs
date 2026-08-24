@@ -5,9 +5,7 @@ use time::format_description::well_known::Rfc3339;
 use time::{Duration, OffsetDateTime};
 
 use crate::error::{AppError, AppResult};
-use crate::models::{
-    RepoFilters, RepoSummary, ReviewCounts, ReviewPreset, SetRepoReviewRequest,
-};
+use crate::models::{RepoFilters, RepoSummary, ReviewCounts, ReviewPreset, SetRepoReviewRequest};
 
 /// No push (or never pushed) for this many months → Inactive queue.
 pub const INACTIVE_MONTHS: i64 = 12;
@@ -149,9 +147,8 @@ pub fn load_review_state(
     conn: &Connection,
     repo_id: i64,
 ) -> AppResult<(Option<String>, Option<String>)> {
-    let mut stmt = conn.prepare(
-        "SELECT reviewed_at, snoozed_until FROM repo_review WHERE repo_id = ?1",
-    )?;
+    let mut stmt =
+        conn.prepare("SELECT reviewed_at, snoozed_until FROM repo_review WHERE repo_id = ?1")?;
     let mut rows = stmt.query([repo_id])?;
     if let Some(row) = rows.next()? {
         Ok((row.get(0)?, row.get(1)?))
@@ -286,9 +283,8 @@ fn forgotten_sql() -> String {
 }
 
 fn add_days(now: &str, days: i64) -> AppResult<String> {
-    let parsed = OffsetDateTime::parse(now, &Rfc3339).map_err(|e| {
-        AppError::new("validation_error", format!("invalid review clock: {e}"))
-    })?;
+    let parsed = OffsetDateTime::parse(now, &Rfc3339)
+        .map_err(|e| AppError::new("validation_error", format!("invalid review clock: {e}")))?;
     parsed
         .checked_add(Duration::days(days))
         .ok_or_else(|| AppError::new("validation_error", "snooze overflow"))?
@@ -357,21 +353,126 @@ mod tests {
 
     fn seed(conn: &Connection) {
         let rows = [
-            repo(1, "fresh-cat", "Rust", "2026-07-01T00:00:00Z", Some("2026-08-01T00:00:00Z"), false),
-            repo(2, "uncat-active", "Rust", "2026-06-01T00:00:00Z", Some("2026-07-01T00:00:00Z"), false),
-            repo(3, "uncat-bucket", "Go", "2026-05-01T00:00:00Z", Some("2026-06-01T00:00:00Z"), false),
-            repo(4, "archived-star", "Rust", "2025-01-01T00:00:00Z", Some("2023-01-01T00:00:00Z"), true),
-            repo(5, "inactive-only", "Rust", "2026-01-01T00:00:00Z", Some("2025-07-01T00:00:00Z"), false),
-            repo(6, "forgotten", "Python", "2023-01-01T00:00:00Z", Some("2024-01-01T00:00:00Z"), false),
-            repo(7, "forgotten-null", "Rust", "2023-01-01T00:00:00Z", None, false),
-            repo(8, "unstarred-hist", "Rust", "2022-01-01T00:00:00Z", Some("2022-01-01T00:00:00Z"), false),
-            repo(9, "unstarred-arch", "Go", "2022-01-01T00:00:00Z", Some("2022-01-01T00:00:00Z"), true),
-            repo(10, "reviewed-uncat", "Rust", "2026-04-01T00:00:00Z", Some("2026-05-01T00:00:00Z"), false),
-            repo(11, "snoozed-uncat", "Rust", "2026-04-15T00:00:00Z", Some("2026-05-15T00:00:00Z"), false),
-            repo(12, "expired-snooze", "Go", "2026-03-01T00:00:00Z", Some("2026-04-01T00:00:00Z"), false),
-            repo(13, "inactive-older", "Rust", "2026-02-01T00:00:00Z", Some("2024-01-01T00:00:00Z"), false),
-            repo(14, "rust-forgotten", "Rust", "2023-06-01T00:00:00Z", Some("2024-06-01T00:00:00Z"), false),
-            repo(15, "go-forgotten", "Go", "2023-06-01T00:00:00Z", Some("2024-06-01T00:00:00Z"), false),
+            repo(
+                1,
+                "fresh-cat",
+                "Rust",
+                "2026-07-01T00:00:00Z",
+                Some("2026-08-01T00:00:00Z"),
+                false,
+            ),
+            repo(
+                2,
+                "uncat-active",
+                "Rust",
+                "2026-06-01T00:00:00Z",
+                Some("2026-07-01T00:00:00Z"),
+                false,
+            ),
+            repo(
+                3,
+                "uncat-bucket",
+                "Go",
+                "2026-05-01T00:00:00Z",
+                Some("2026-06-01T00:00:00Z"),
+                false,
+            ),
+            repo(
+                4,
+                "archived-star",
+                "Rust",
+                "2025-01-01T00:00:00Z",
+                Some("2023-01-01T00:00:00Z"),
+                true,
+            ),
+            repo(
+                5,
+                "inactive-only",
+                "Rust",
+                "2026-01-01T00:00:00Z",
+                Some("2025-07-01T00:00:00Z"),
+                false,
+            ),
+            repo(
+                6,
+                "forgotten",
+                "Python",
+                "2023-01-01T00:00:00Z",
+                Some("2024-01-01T00:00:00Z"),
+                false,
+            ),
+            repo(
+                7,
+                "forgotten-null",
+                "Rust",
+                "2023-01-01T00:00:00Z",
+                None,
+                false,
+            ),
+            repo(
+                8,
+                "unstarred-hist",
+                "Rust",
+                "2022-01-01T00:00:00Z",
+                Some("2022-01-01T00:00:00Z"),
+                false,
+            ),
+            repo(
+                9,
+                "unstarred-arch",
+                "Go",
+                "2022-01-01T00:00:00Z",
+                Some("2022-01-01T00:00:00Z"),
+                true,
+            ),
+            repo(
+                10,
+                "reviewed-uncat",
+                "Rust",
+                "2026-04-01T00:00:00Z",
+                Some("2026-05-01T00:00:00Z"),
+                false,
+            ),
+            repo(
+                11,
+                "snoozed-uncat",
+                "Rust",
+                "2026-04-15T00:00:00Z",
+                Some("2026-05-15T00:00:00Z"),
+                false,
+            ),
+            repo(
+                12,
+                "expired-snooze",
+                "Go",
+                "2026-03-01T00:00:00Z",
+                Some("2026-04-01T00:00:00Z"),
+                false,
+            ),
+            repo(
+                13,
+                "inactive-older",
+                "Rust",
+                "2026-02-01T00:00:00Z",
+                Some("2024-01-01T00:00:00Z"),
+                false,
+            ),
+            repo(
+                14,
+                "rust-forgotten",
+                "Rust",
+                "2023-06-01T00:00:00Z",
+                Some("2024-06-01T00:00:00Z"),
+                false,
+            ),
+            repo(
+                15,
+                "go-forgotten",
+                "Go",
+                "2023-06-01T00:00:00Z",
+                Some("2024-06-01T00:00:00Z"),
+                false,
+            ),
         ];
         apply_full_diff(conn, &rows).expect("seed");
 
@@ -473,12 +574,10 @@ mod tests {
                 !uncat_names.contains(&"unstarred-hist".into()),
                 "unstarred excluded from active uncategorized"
             );
-            assert!(
-                uncat
-                    .items
-                    .iter()
-                    .all(|r| r.review_reason.as_deref() == Some("Uncategorized"))
-            );
+            assert!(uncat
+                .items
+                .iter()
+                .all(|r| r.review_reason.as_deref() == Some("Uncategorized")));
 
             let archived = list_preset(&conn, ReviewPreset::Archived);
             let archived_names = names(&archived);
@@ -530,11 +629,20 @@ mod tests {
         with_frozen_now(TEST_NOW, || {
             let inactive = list_preset(&conn, ReviewPreset::Inactive);
             let names = names(&inactive);
-            let null_pos = names.iter().position(|n| n == "forgotten-null").expect("null");
+            let null_pos = names
+                .iter()
+                .position(|n| n == "forgotten-null")
+                .expect("null");
             assert_eq!(null_pos, 0, "null pushed_at is the most stale: {names:?}");
 
-            let older = names.iter().position(|n| n == "inactive-older").expect("older");
-            let newer = names.iter().position(|n| n == "inactive-only").expect("newer");
+            let older = names
+                .iter()
+                .position(|n| n == "inactive-older")
+                .expect("older");
+            let newer = names
+                .iter()
+                .position(|n| n == "inactive-only")
+                .expect("newer");
             assert!(
                 older < newer,
                 "older push should rank before newer push: {names:?}"
@@ -753,9 +861,15 @@ mod tests {
     #[test]
     fn github_client_source_is_get_only() {
         let src = include_str!("github.rs");
-        assert!(src.contains(".get(url)"), "starred/readme fetch must stay GET");
         assert!(
-            !src.contains(".post(") && !src.contains(".put(") && !src.contains(".patch(") && !src.contains(".delete("),
+            src.contains(".get(url)"),
+            "starred/readme fetch must stay GET"
+        );
+        assert!(
+            !src.contains(".post(")
+                && !src.contains(".put(")
+                && !src.contains(".patch(")
+                && !src.contains(".delete("),
             "review feature must not introduce GitHub write verbs"
         );
         let review_src = include_str!("review.rs");

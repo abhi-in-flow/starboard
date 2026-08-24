@@ -11,10 +11,7 @@ pub fn get_review_counts(state: State<'_, DbState>) -> AppResult<ReviewCounts> {
 }
 
 #[tauri::command]
-pub fn set_repo_review(
-    state: State<'_, DbState>,
-    request: SetRepoReviewRequest,
-) -> AppResult<()> {
+pub fn set_repo_review(state: State<'_, DbState>, request: SetRepoReviewRequest) -> AppResult<()> {
     if request.repo_id <= 0 {
         return Err(AppError::new("validation_error", "repo_id is required"));
     }
