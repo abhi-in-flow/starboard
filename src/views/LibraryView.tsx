@@ -7,7 +7,12 @@ import { RepoVirtualList } from "@/components/library/RepoVirtualList";
 import { OnboardingGuide } from "@/components/OnboardingGuide";
 import { onboardingSurface } from "@/lib/onboarding";
 import { isYoungLibrary, reviewPresetMeta } from "@/lib/review";
-import { getReviewCounts, getSetupStatus, listRepos, searchRepos } from "@/lib/tauri";
+import {
+  getReviewCounts,
+  getSetupStatus,
+  listRepos,
+  searchRepos,
+} from "@/lib/tauri";
 import { useUiStore } from "@/store/ui";
 import type { RepoFilters, RepoListResult } from "@/types";
 

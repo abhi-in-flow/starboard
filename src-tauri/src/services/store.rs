@@ -503,6 +503,17 @@ mod tests {
             .expect("attempts col");
         assert_eq!(has_status, 1);
         assert_eq!(has_attempts, 1);
+        let has_review: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE name = 'repo_review'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("004 after 003");
+        assert_eq!(
+            has_review, 1,
+            "001→002→003→004 upgrade must create repo_review"
+        );
         let _ = std::fs::remove_file(path);
     }
 
@@ -531,8 +542,8 @@ mod tests {
             );
 
             conn.execute(
-                "INSERT INTO repos (id, full_name, owner, name, html_url, starred_at, fetched_at)
-                 VALUES (1, 'owner/kept', 'owner', 'kept', 'https://github.com/owner/kept',
+                "INSERT INTO repos (id, full_name, owner, name, topics, html_url, starred_at, fetched_at)
+                 VALUES (1, 'owner/kept', 'owner', 'kept', '[]', 'https://github.com/owner/kept',
                          '2024-01-01T00:00:00Z', '2024-01-01T00:00:00Z')",
                 [],
             )
@@ -540,6 +551,17 @@ mod tests {
         }
 
         let conn = open_and_migrate(&path).expect("upgrade");
+        let has_hash: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('repos') WHERE name = 'document_hash'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("003 column");
+        assert_eq!(
+            has_hash, 1,
+            "001/002→003→004 upgrade must apply hardening document_hash"
+        );
         let has_review: i64 = conn
             .query_row(
                 "SELECT COUNT(*) FROM sqlite_master WHERE name = 'repo_review'",

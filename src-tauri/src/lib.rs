@@ -9,7 +9,8 @@ pub use services::sanitize::is_safe_markdown_url;
 
 use tauri::Manager;
 
-use commands::{auth, categorize, embed, insights, repos, review, settings, setup, status, sync};use services::categorizer::CategorizeState;
+use commands::{auth, categorize, embed, insights, repos, review, settings, setup, status, sync};
+use services::categorizer::CategorizeState;
 use services::embed::EmbedState;
 use services::store::{self, DbState};
 use services::sync::SyncState;

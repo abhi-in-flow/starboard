@@ -216,35 +216,37 @@ pub fn set_repo_review_at(
         }
     }
 
-    let (cur_reviewed, cur_snooze) = load_review_state(conn, request.repo_id)?;
+    crate::services::store::with_tx(conn, |tx| {
+        let (cur_reviewed, cur_snooze) = load_review_state(tx, request.repo_id)?;
 
-    let reviewed_at = match request.reviewed {
-        Some(true) => Some(now.to_string()),
-        Some(false) => None,
-        None => cur_reviewed,
-    };
+        let reviewed_at = match request.reviewed {
+            Some(true) => Some(now.to_string()),
+            Some(false) => None,
+            None => cur_reviewed,
+        };
 
-    let snoozed_until = if request.reviewed == Some(true) {
-        None
-    } else if let Some(days) = request.snooze_days {
-        if days == 0 {
+        let snoozed_until = if request.reviewed == Some(true) {
             None
+        } else if let Some(days) = request.snooze_days {
+            if days == 0 {
+                None
+            } else {
+                Some(add_days(now, days)?)
+            }
         } else {
-            Some(add_days(now, days)?)
-        }
-    } else {
-        cur_snooze
-    };
+            cur_snooze
+        };
 
-    conn.execute(
-        "INSERT INTO repo_review (repo_id, reviewed_at, snoozed_until)
-         VALUES (?1, ?2, ?3)
-         ON CONFLICT(repo_id) DO UPDATE SET
-            reviewed_at = excluded.reviewed_at,
-            snoozed_until = excluded.snoozed_until",
-        params![request.repo_id, reviewed_at, snoozed_until],
-    )?;
-    Ok(())
+        tx.execute(
+            "INSERT INTO repo_review (repo_id, reviewed_at, snoozed_until)
+             VALUES (?1, ?2, ?3)
+             ON CONFLICT(repo_id) DO UPDATE SET
+                reviewed_at = excluded.reviewed_at,
+                snoozed_until = excluded.snoozed_until",
+            params![request.repo_id, reviewed_at, snoozed_until],
+        )?;
+        Ok(())
+    })
 }
 
 fn count_preset(conn: &Connection, preset: ReviewPreset, now: &str) -> AppResult<i64> {
