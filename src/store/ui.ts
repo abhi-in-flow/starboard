@@ -1,4 +1,12 @@
 import { create } from "zustand";
+import {
+  applyCategoryId,
+  applyHideArchived,
+  applyHideUnstarred,
+  applyReviewPreset,
+  clearedLibraryFilters,
+  type LibraryFilterState,
+} from "@/lib/libraryFilters";
 import type { RepoSort, ReviewPreset, SearchMode } from "@/types";
 
 export type AppView = "library" | "categories" | "insights" | "settings";
@@ -7,7 +15,7 @@ export type SettingsTab = "general" | "status";
 export type SettingsSection = "github" | "ollama";
 export type CategoriesSection = "taxonomy" | "assign";
 
-type UiState = {
+type UiState = LibraryFilterState & {
   view: AppView;
   setView: (view: AppView) => void;
 
@@ -17,7 +25,7 @@ type UiState = {
   setSettingsSection: (section: SettingsSection | null) => void;
   categoriesSection: CategoriesSection | null;
   setCategoriesSection: (section: CategoriesSection | null) => void;
-  openSettings: (section?: SettingsSection) => void;
+  openSettings: (section?: SettingsSection, tab?: SettingsTab) => void;
   openCategories: (section?: CategoriesSection) => void;
 
   layout: LibraryLayout;
@@ -31,20 +39,12 @@ type UiState = {
   searchModeInitialized: boolean;
   setSearchModeInitialized: (v: boolean) => void;
 
-  sort: RepoSort;
-  sortDesc: boolean;
   setSort: (sort: RepoSort) => void;
   setSortDesc: (desc: boolean) => void;
 
-  hideUnstarred: boolean;
-  hideArchived: boolean;
   setHideUnstarred: (v: boolean) => void;
   setHideArchived: (v: boolean) => void;
 
-  language: string | null;
-  topic: string | null;
-  categoryId: number | null;
-  reviewPreset: ReviewPreset | null;
   setLanguage: (v: string | null) => void;
   setTopic: (v: string | null) => void;
   setCategoryId: (v: number | null) => void;
@@ -53,41 +53,14 @@ type UiState = {
     preset: ReviewPreset;
     categoryId?: number | null;
   }) => void;
+  openLibraryCategory: (categoryId: number) => void;
+  openLibraryLanguage: (language: string) => void;
+  applyFilterPatch: (patch: Partial<LibraryFilterState>) => void;
   clearFilters: () => void;
 
   selectedRepoId: number | null;
   setSelectedRepoId: (id: number | null) => void;
 };
-
-function patchForPreset(preset: ReviewPreset | null): Partial<UiState> {
-  if (preset == null) {
-    return {
-      reviewPreset: null,
-      sort: "starredAt",
-      sortDesc: true,
-    };
-  }
-  const base: Partial<UiState> = {
-    reviewPreset: preset,
-    sort: "stale",
-    sortDesc: false,
-  };
-  if (preset === "archived") {
-    return { ...base, hideArchived: false, hideUnstarred: true };
-  }
-  if (preset === "unstarred") {
-    return { ...base, hideUnstarred: false, hideArchived: false };
-  }
-  if (preset === "uncategorized") {
-    return {
-      ...base,
-      hideUnstarred: true,
-      hideArchived: true,
-      categoryId: null,
-    };
-  }
-  return { ...base, hideUnstarred: true };
-}
 
 export const useUiStore = create<UiState>((set) => ({
   view: "library",
@@ -99,10 +72,10 @@ export const useUiStore = create<UiState>((set) => ({
   setSettingsSection: (settingsSection) => set({ settingsSection }),
   categoriesSection: null,
   setCategoriesSection: (categoriesSection) => set({ categoriesSection }),
-  openSettings: (section) =>
+  openSettings: (section, tab) =>
     set({
       view: "settings",
-      settingsTab: "general",
+      settingsTab: tab ?? "general",
       settingsSection: section ?? null,
     }),
   openCategories: (section) =>
@@ -123,50 +96,41 @@ export const useUiStore = create<UiState>((set) => ({
   setSearchModeInitialized: (searchModeInitialized) =>
     set({ searchModeInitialized }),
 
-  sort: "starredAt",
-  sortDesc: true,
+  ...clearedLibraryFilters(),
   setSort: (sort) => set({ sort }),
   setSortDesc: (sortDesc) => set({ sortDesc }),
 
-  hideUnstarred: true,
-  hideArchived: true,
   setHideUnstarred: (hideUnstarred) =>
-    set((s) => ({
-      hideUnstarred,
-      reviewPreset:
-        hideUnstarred && s.reviewPreset === "unstarred" ? null : s.reviewPreset,
-    })),
+    set((s) => applyHideUnstarred(s, hideUnstarred)),
   setHideArchived: (hideArchived) =>
-    set((s) => ({
-      hideArchived,
-      reviewPreset:
-        hideArchived && s.reviewPreset === "archived" ? null : s.reviewPreset,
-    })),
+    set((s) => applyHideArchived(s, hideArchived)),
 
-  language: null,
-  topic: null,
-  categoryId: null,
-  reviewPreset: null,
   setLanguage: (language) => set({ language }),
   setTopic: (topic) => set({ topic }),
-  setCategoryId: (categoryId) =>
-    set((s) => ({
-      categoryId,
-      reviewPreset:
-        categoryId != null && s.reviewPreset === "uncategorized"
-          ? null
-          : s.reviewPreset,
-    })),
-  setReviewPreset: (preset) => set(patchForPreset(preset)),
+  setCategoryId: (categoryId) => set((s) => applyCategoryId(s, categoryId)),
+  setReviewPreset: (preset) => set((s) => applyReviewPreset(s, preset)),
   openLibraryReview: ({ preset, categoryId }) =>
     set((s) => ({
       view: "library",
       selectedRepoId: null,
-      ...patchForPreset(preset),
+      ...applyReviewPreset(s, preset),
       categoryId:
         preset === "uncategorized" ? null : (categoryId ?? s.categoryId),
     })),
-  clearFilters: () => set({ language: null, topic: null, categoryId: null }),
+  openLibraryCategory: (categoryId) =>
+    set((s) => ({
+      view: "library",
+      selectedRepoId: null,
+      ...applyCategoryId(s, categoryId),
+    })),
+  openLibraryLanguage: (language) =>
+    set({
+      view: "library",
+      selectedRepoId: null,
+      language,
+    }),
+  applyFilterPatch: (patch) => set(patch),
+  clearFilters: () => set(clearedLibraryFilters()),
 
   selectedRepoId: null,
   setSelectedRepoId: (selectedRepoId) => set({ selectedRepoId }),

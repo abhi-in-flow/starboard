@@ -232,9 +232,28 @@ export function OnboardingGuide({ variant }: Props) {
 
   if (setupQuery.isError || !status) {
     return (
-      <div className="p-6 text-sm text-destructive" role="alert">
-        Could not load setup status
-        {setupQuery.error ? `: ${errorMessage(setupQuery.error)}` : "."}
+      <div className="flex flex-col items-start gap-3 p-6">
+        <p className="text-sm text-destructive" role="alert">
+          Could not load setup status
+          {setupQuery.error ? `: ${errorMessage(setupQuery.error)}` : "."}
+        </p>
+        <div className="flex flex-wrap gap-2">
+          <Button
+            type="button"
+            size="sm"
+            onClick={() => void setupQuery.refetch()}
+          >
+            Retry
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            onClick={() => openSettings("github")}
+          >
+            Settings
+          </Button>
+        </div>
       </div>
     );
   }
