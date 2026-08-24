@@ -16,6 +16,8 @@ pub const KEY_EMBED_DIMENSION: &str = "embed_dimension";
 /// Dimension the live `repo_embeddings` vec0 table was created with.
 pub const KEY_EMBEDDINGS_TABLE_DIMENSION: &str = "embeddings_table_dimension";
 const KEY_AUTO_CATEGORIZE_AFTER_SYNC: &str = "auto_categorize_after_sync";
+/// User dismissed or finished the first-run setup guide.
+pub const KEY_ONBOARDING_COMPLETED: &str = "onboarding_completed";
 
 pub fn get_settings(conn: &Connection) -> AppResult<AppSettings> {
     let defaults = AppSettings::default();
@@ -180,6 +182,21 @@ pub fn set_value(conn: &Connection, key: &str, value: &str) -> AppResult<()> {
     Ok(())
 }
 
+pub fn get_onboarding_completed(conn: &Connection) -> AppResult<bool> {
+    Ok(matches!(
+        get_value(conn, KEY_ONBOARDING_COMPLETED)?.as_deref(),
+        Some("true") | Some("1")
+    ))
+}
+
+pub fn set_onboarding_completed(conn: &Connection, completed: bool) -> AppResult<()> {
+    set_value(
+        conn,
+        KEY_ONBOARDING_COMPLETED,
+        if completed { "true" } else { "false" },
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -272,5 +289,15 @@ mod tests {
         assert!(file.message.contains("http"));
         let empty = validate_ollama_base_url("   ").unwrap_err();
         assert!(empty.message.contains("empty"));
+    }
+
+    #[test]
+    fn onboarding_completed_roundtrip() {
+        let conn = test_conn();
+        assert!(!get_onboarding_completed(&conn).expect("get"));
+        set_onboarding_completed(&conn, true).expect("set");
+        assert!(get_onboarding_completed(&conn).expect("get"));
+        set_onboarding_completed(&conn, false).expect("clear");
+        assert!(!get_onboarding_completed(&conn).expect("get"));
     }
 }

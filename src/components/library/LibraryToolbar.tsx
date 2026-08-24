@@ -127,6 +127,7 @@ export function LibraryToolbar({ searchRef, total, searchHint }: Props) {
       setJobNotice(null);
       setJobError(null);
       void queryClient.invalidateQueries({ queryKey: ["embedStatus"] });
+      void queryClient.invalidateQueries({ queryKey: ["setupStatus"] });
     },
     onError: (err) => {
       const message =

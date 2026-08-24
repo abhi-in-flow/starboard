@@ -3,10 +3,22 @@ import type { RepoSort, SearchMode } from "@/types";
 
 export type AppView = "library" | "categories" | "insights" | "settings";
 export type LibraryLayout = "list" | "grid";
+export type SettingsTab = "general" | "status";
+export type SettingsSection = "github" | "ollama";
+export type CategoriesSection = "taxonomy" | "assign";
 
 type UiState = {
   view: AppView;
   setView: (view: AppView) => void;
+
+  settingsTab: SettingsTab;
+  setSettingsTab: (tab: SettingsTab) => void;
+  settingsSection: SettingsSection | null;
+  setSettingsSection: (section: SettingsSection | null) => void;
+  categoriesSection: CategoriesSection | null;
+  setCategoriesSection: (section: CategoriesSection | null) => void;
+  openSettings: (section?: SettingsSection) => void;
+  openCategories: (section?: CategoriesSection) => void;
 
   layout: LibraryLayout;
   setLayout: (layout: LibraryLayout) => void;
@@ -44,6 +56,24 @@ type UiState = {
 export const useUiStore = create<UiState>((set) => ({
   view: "library",
   setView: (view) => set({ view }),
+
+  settingsTab: "general",
+  setSettingsTab: (settingsTab) => set({ settingsTab }),
+  settingsSection: null,
+  setSettingsSection: (settingsSection) => set({ settingsSection }),
+  categoriesSection: null,
+  setCategoriesSection: (categoriesSection) => set({ categoriesSection }),
+  openSettings: (section) =>
+    set({
+      view: "settings",
+      settingsTab: "general",
+      settingsSection: section ?? null,
+    }),
+  openCategories: (section) =>
+    set({
+      view: "categories",
+      categoriesSection: section ?? null,
+    }),
 
   layout: "list",
   setLayout: (layout) => set({ layout }),

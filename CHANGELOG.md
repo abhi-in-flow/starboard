@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.10.0 — Guided onboarding
+
+- First-run setup guide walks through GitHub PAT, initial sync, and optional Ollama / taxonomy / assignment / embeddings.
+- Step completion is derived from backend truth (auth, sync history, categories, embeddings); dismissal persists in settings and can be reopened from Settings → General.
+- Optional AI steps never block Keyword-only use, Skip for now, or Finish setup.
+
 ## 0.9.0 — Automatic categorization
 
 - After a successful GitHub sync and README drain, new uncategorized repos are assigned automatically when a taxonomy is committed and Ollama is reachable.

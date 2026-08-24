@@ -332,3 +332,20 @@ export type SystemStatus = {
   categorization: CategorizationPanel;
   integrity?: IntegrityReport | null;
 };
+
+/** Mirrored from SetupStatus — first-run checklist snapshot (no Ollama HTTP). */
+export type SetupStatus = {
+  githubConnected: boolean;
+  githubUsername: string | null;
+  lastSyncedAt: string | null;
+  repoCount: number;
+  ollamaBaseUrl: string;
+  ollamaChatModel: string;
+  ollamaConfigured: boolean;
+  categoryCount: number;
+  categorizedRepos: number;
+  assignmentCoverage: number;
+  embeddedRepos: number;
+  embeddingCoverage: number;
+  onboardingCompleted: boolean;
+};
