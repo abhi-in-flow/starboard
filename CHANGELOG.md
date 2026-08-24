@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.9.0 — Automatic categorization
+
+- After a successful GitHub sync and README drain, new uncategorized repos are assigned automatically when a taxonomy is committed and Ollama is reachable.
+- The same pass resumes on launch if eligible uncategorized work remains; manual overrides are never overwritten.
+- Auto-categorize after sync is on by default (toggle in Settings → Ollama). Silent no-op when disabled, offline, or nothing is pending.
+
 ## 0.8.0 — Production hardening
 
 - SQLite WAL/FK/busy_timeout/`synchronous=NORMAL`, transactional sync/taxonomy/embed/auth writes, ETag persisted only after apply commits, orphaned `sync_log` reconciliation, and migration 003 indexes plus README/document-hash columns.
