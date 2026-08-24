@@ -7,6 +7,8 @@ export type AppSettings = {
   embedDimension: number;
   githubUsername: string | null;
   embeddingsNeedRebuild: boolean;
+  /** Defaults on when unset — assign new/uncategorized repos after sync. */
+  autoCategorizeAfterSync: boolean;
 };
 
 export type AuthStatus = {
@@ -19,6 +21,7 @@ export type UpdateSettingsRequest = {
   ollamaChatModel?: string;
   ollamaEmbedModel?: string;
   embedDimension?: number;
+  autoCategorizeAfterSync?: boolean;
 };
 
 export type AppError = {
@@ -320,6 +323,7 @@ export type CategorizationPanel = {
   uncategorizedRepos: number;
   llmAssignments: number;
   manualAssignments: number;
+  autoCategorizeAfterSync: boolean;
   categories: CategoryNode[];
 };
 

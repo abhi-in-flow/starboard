@@ -10,6 +10,9 @@ pub struct AppSettings {
     pub github_username: Option<String>,
     /// True when settings `embed_dimension` differs from the live vec0 table.
     pub embeddings_need_rebuild: bool,
+    /// After sync + README drain, assign new/uncategorized repos via Ollama.
+    /// Defaults on when the settings key is missing (new installs and upgrades).
+    pub auto_categorize_after_sync: bool,
 }
 
 impl Default for AppSettings {
@@ -21,6 +24,7 @@ impl Default for AppSettings {
             embed_dimension: 768,
             github_username: None,
             embeddings_need_rebuild: false,
+            auto_categorize_after_sync: true,
         }
     }
 }
@@ -39,6 +43,7 @@ pub struct UpdateSettingsRequest {
     pub ollama_chat_model: Option<String>,
     pub ollama_embed_model: Option<String>,
     pub embed_dimension: Option<i64>,
+    pub auto_categorize_after_sync: Option<bool>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -566,5 +571,6 @@ pub struct CategorizationPanel {
     pub uncategorized_repos: i64,
     pub llm_assignments: i64,
     pub manual_assignments: i64,
+    pub auto_categorize_after_sync: bool,
     pub categories: Vec<CategoryNode>,
 }

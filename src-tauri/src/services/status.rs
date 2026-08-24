@@ -77,6 +77,7 @@ fn categorization_panel(conn: &Connection) -> AppResult<CategorizationPanel> {
         |row| row.get(0),
     )?;
     let categories = categories::list_category_tree(conn)?;
+    let app_settings = settings::get_settings(conn)?;
 
     Ok(CategorizationPanel {
         total_repos,
@@ -84,6 +85,7 @@ fn categorization_panel(conn: &Connection) -> AppResult<CategorizationPanel> {
         uncategorized_repos,
         llm_assignments,
         manual_assignments,
+        auto_categorize_after_sync: app_settings.auto_categorize_after_sync,
         categories,
     })
 }
@@ -144,6 +146,7 @@ mod tests {
         assert_eq!(status.categorization.uncategorized_repos, 0);
         assert_eq!(status.categorization.llm_assignments, 0);
         assert_eq!(status.categorization.manual_assignments, 0);
+        assert!(status.categorization.auto_categorize_after_sync);
         assert!(status.categorization.categories.is_empty());
     }
 
@@ -214,6 +217,7 @@ mod tests {
         assert_eq!(status.categorization.uncategorized_repos, 1);
         assert_eq!(status.categorization.llm_assignments, 1);
         assert_eq!(status.categorization.manual_assignments, 1);
+        assert!(status.categorization.auto_categorize_after_sync);
 
         let ai = status
             .categorization
