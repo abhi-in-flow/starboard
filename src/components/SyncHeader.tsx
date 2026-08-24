@@ -2,7 +2,11 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { listen } from "@tauri-apps/api/event";
 import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
-import { isCancelledMessage } from "@/lib/jobStatus";
+import {
+  classifyJobFailure,
+  errorMessage,
+  isCancelledMessage,
+} from "@/lib/jobStatus";
 import {
   cancelReadmeQueue,
   cancelSync,
@@ -11,17 +15,7 @@ import {
   resumeReadmeQueue,
   startSync,
 } from "@/lib/tauri";
-import type { AppError, SyncProgress } from "@/types";
-
-function errorMessage(err: unknown): string {
-  if (err && typeof err === "object" && "message" in err) {
-    return String((err as AppError).message);
-  }
-  if (err instanceof Error) {
-    return err.message;
-  }
-  return "Sync failed";
-}
+import type { SyncProgress } from "@/types";
 
 function formatRelative(iso: string | null | undefined): string {
   if (!iso) {
@@ -118,8 +112,15 @@ export function SyncHeader() {
       void queryClient.invalidateQueries({ queryKey: ["syncStatus"] });
     },
     onError: (err) => {
+      const outcome = classifyJobFailure(err, "Sync failed");
       setProgress(null);
-      setSyncError(errorMessage(err));
+      if (outcome.kind === "cancelled") {
+        setSyncNotice(outcome.message);
+        setSyncError(null);
+      } else {
+        setSyncError(outcome.message);
+        setSyncNotice(null);
+      }
       void queryClient.invalidateQueries({ queryKey: ["syncStatus"] });
     },
   });
@@ -141,7 +142,14 @@ export function SyncHeader() {
       void queryClient.invalidateQueries({ queryKey: ["syncStatus"] });
     },
     onError: (err) => {
-      setSyncError(errorMessage(err));
+      const outcome = classifyJobFailure(err, "Sync failed");
+      if (outcome.kind === "cancelled") {
+        setSyncNotice(outcome.message);
+        setSyncError(null);
+      } else {
+        setSyncError(outcome.message);
+        setSyncNotice(null);
+      }
       void queryClient.invalidateQueries({ queryKey: ["syncStatus"] });
     },
   });
@@ -162,7 +170,8 @@ export function SyncHeader() {
       void queryClient.invalidateQueries({ queryKey: ["syncStatus"] });
     },
     onError: (err) => {
-      setSyncError(errorMessage(err));
+      // Cancel-command failures (e.g. nothing running) stay destructive.
+      setSyncError(errorMessage(err, "Cancel failed"));
     },
   });
   const pendingReadmes = syncQuery.data?.pendingReadmes ?? 0;
