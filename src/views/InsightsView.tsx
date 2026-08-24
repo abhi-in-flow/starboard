@@ -356,7 +356,10 @@ function MetricsTable({
                     </Badge>
                   </button>
                 ) : (
-                  <Badge variant={badgeVariant(row.badge)} className="capitalize">
+                  <Badge
+                    variant={badgeVariant(row.badge)}
+                    className="capitalize"
+                  >
                     {row.badge}
                   </Badge>
                 )}

@@ -180,7 +180,10 @@ export function LibraryToolbar({ searchRef, total, searchHint }: Props) {
   const needEmbeddings =
     (embedStatus.data?.staleOrMissing ?? 0) > 0 || coverage < 0.9;
   const hasChips =
-    language != null || topic != null || categoryId != null || reviewPreset != null;
+    language != null ||
+    topic != null ||
+    categoryId != null ||
+    reviewPreset != null;
   const countFor = (id: ReviewPreset) => reviewCounts.data?.[id] ?? null;
   // Semantic/Hybrid results are RRF-ordered; sort control would be misleading.
   const sortedByRelevance =
@@ -236,10 +239,7 @@ export function LibraryToolbar({ searchRef, total, searchHint }: Props) {
             setReviewPreset(v === "browse" ? null : (v as ReviewPreset))
           }
         >
-          <SelectTrigger
-            className="h-10 w-[11.5rem]"
-            aria-label="Review queue"
-          >
+          <SelectTrigger className="h-10 w-[11.5rem]" aria-label="Review queue">
             <Inbox className="size-4" />
             <SelectValue placeholder="Review" />
           </SelectTrigger>

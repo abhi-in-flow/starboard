@@ -52,7 +52,8 @@ export const REVIEW_PRESETS: ReviewPresetMeta[] = [
   {
     id: "unstarred",
     label: "Unstarred history",
-    description: "Previously starred, later unstarred. Local history only — not an active count.",
+    description:
+      "Previously starred, later unstarred. Local history only — not an active count.",
     reason: "Unstarred",
     history: true,
   },

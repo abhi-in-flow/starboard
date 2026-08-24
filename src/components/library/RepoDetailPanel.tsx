@@ -313,7 +313,9 @@ export function RepoDetailPanel({ repoId }: Props) {
                   type="button"
                   size="sm"
                   variant="outline"
-                  disabled={reviewMutation.isPending || Boolean(repo.reviewedAt)}
+                  disabled={
+                    reviewMutation.isPending || Boolean(repo.reviewedAt)
+                  }
                   onClick={() =>
                     reviewMutation.mutate({
                       repoId,

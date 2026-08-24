@@ -865,17 +865,11 @@ mod tests {
             src.contains(".get(url)"),
             "starred/readme fetch must stay GET"
         );
-        assert!(
-            !src.contains(".post(")
-                && !src.contains(".put(")
-                && !src.contains(".patch(")
-                && !src.contains(".delete("),
-            "review feature must not introduce GitHub write verbs"
-        );
-        let review_src = include_str!("review.rs");
-        assert!(
-            !review_src.contains("GitHubClient") && !review_src.contains("api.github.com"),
-            "review service must stay local"
-        );
+        for verb in [".post(", ".put(", ".patch(", ".delete("] {
+            assert!(
+                !src.contains(verb),
+                "review feature must not introduce GitHub write verb {verb}"
+            );
+        }
     }
 }

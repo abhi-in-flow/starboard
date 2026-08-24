@@ -134,9 +134,7 @@ export const useUiStore = create<UiState>((set) => ({
     set((s) => ({
       hideUnstarred,
       reviewPreset:
-        hideUnstarred && s.reviewPreset === "unstarred"
-          ? null
-          : s.reviewPreset,
+        hideUnstarred && s.reviewPreset === "unstarred" ? null : s.reviewPreset,
     })),
   setHideArchived: (hideArchived) =>
     set((s) => ({
@@ -166,9 +164,7 @@ export const useUiStore = create<UiState>((set) => ({
       selectedRepoId: null,
       ...patchForPreset(preset),
       categoryId:
-        preset === "uncategorized"
-          ? null
-          : (categoryId ?? s.categoryId),
+        preset === "uncategorized" ? null : (categoryId ?? s.categoryId),
     })),
   clearFilters: () => set({ language: null, topic: null, categoryId: null }),
 

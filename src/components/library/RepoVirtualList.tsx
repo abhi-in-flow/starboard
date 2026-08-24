@@ -61,18 +61,17 @@ function ReviewActions({
   });
 
   return (
-    <div
-      className="flex flex-wrap items-center gap-1"
-      onClick={(e) => e.stopPropagation()}
-      onKeyDown={(e) => e.stopPropagation()}
-    >
+    <div className="flex flex-wrap items-center gap-1">
       {htmlUrl ? (
         <Button
           type="button"
           size="sm"
           variant="ghost"
           className="h-7 px-2 text-[11px]"
-          onClick={() => void openUrl(htmlUrl)}
+          onClick={(e) => {
+            e.stopPropagation();
+            void openUrl(htmlUrl);
+          }}
         >
           <ExternalLink className="size-3" />
           GitHub
@@ -84,9 +83,10 @@ function ReviewActions({
         variant="outline"
         className="h-7 px-2 text-[11px]"
         disabled={mutation.isPending}
-        onClick={() =>
-          mutation.mutate({ repoId, reviewed: true, snoozeDays: null })
-        }
+        onClick={(e) => {
+          e.stopPropagation();
+          mutation.mutate({ repoId, reviewed: true, snoozeDays: null });
+        }}
       >
         Reviewed
       </Button>
@@ -135,118 +135,115 @@ function RepoRow({
 
   return (
     <div
-      draggable
-      onDragStart={(e) => {
-        e.dataTransfer.setData(REPO_DND_TYPE, String(repo.id));
-        e.dataTransfer.effectAllowed = "move";
-      }}
-      onClick={onSelect}
-      onKeyDown={(e) => {
-        if (e.key === "Enter" || e.key === " ") {
-          e.preventDefault();
-          onSelect();
-        }
-      }}
-      role="button"
-      tabIndex={0}
       className={cn(
-        "flex w-full cursor-grab gap-3 border-b border-border/80 px-4 py-3 text-left transition-colors active:cursor-grabbing",
+        "flex w-full gap-3 border-b border-border/80 px-4 py-3 text-left transition-colors",
         selected ? "bg-accent" : "hover:bg-muted/40",
         compact &&
           "rounded-xl border border-border bg-card px-3 py-3 shadow-sm",
       )}
     >
-      <RepoAvatar fullName={repo.fullName} size={compact ? 36 : 40} />
+      <button
+        type="button"
+        draggable
+        onDragStart={(e) => {
+          e.dataTransfer.setData(REPO_DND_TYPE, String(repo.id));
+          e.dataTransfer.effectAllowed = "move";
+        }}
+        onClick={onSelect}
+        className="flex min-w-0 flex-1 cursor-grab gap-3 text-left active:cursor-grabbing"
+      >
+        <RepoAvatar fullName={repo.fullName} size={compact ? 36 : 40} />
 
-      <div className="min-w-0 flex-1">
-        <div className="flex items-start justify-between gap-3">
-          <div className="min-w-0">
-            <p className="truncate text-sm font-semibold tracking-tight">
-              <span className="text-muted-foreground">{owner}</span>
-              <span className="text-muted-foreground"> / </span>
-              <span>{name}</span>
-            </p>
-            {repo.description ? (
-              <p className="mt-0.5 line-clamp-1 text-sm text-muted-foreground">
-                {repo.description}
+        <div className="min-w-0 flex-1">
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <p className="truncate text-sm font-semibold tracking-tight">
+                <span className="text-muted-foreground">{owner}</span>
+                <span className="text-muted-foreground"> / </span>
+                <span>{name}</span>
               </p>
-            ) : null}
+              {repo.description ? (
+                <p className="mt-0.5 line-clamp-1 text-sm text-muted-foreground">
+                  {repo.description}
+                </p>
+              ) : null}
+            </div>
+            <div className="flex shrink-0 flex-col items-end gap-1 text-xs text-muted-foreground">
+              <span className="inline-flex items-center gap-1 font-medium text-foreground">
+                <Star className="size-3.5 fill-amber-400 text-amber-400" />
+                {formatCount(repo.starsCount)}
+              </span>
+              {!compact ? (
+                <>
+                  <span>Updated {formatRelative(repo.pushedAt)}</span>
+                  <span>Starred {formatRelative(repo.starredAt)}</span>
+                </>
+              ) : null}
+            </div>
           </div>
-          <div className="flex shrink-0 flex-col items-end gap-1 text-xs text-muted-foreground">
-            <span className="inline-flex items-center gap-1 font-medium text-foreground">
-              <Star className="size-3.5 fill-amber-400 text-amber-400" />
-              {formatCount(repo.starsCount)}
-            </span>
-            {!compact ? (
-              <>
-                <span>Updated {formatRelative(repo.pushedAt)}</span>
-                <span>Starred {formatRelative(repo.starredAt)}</span>
-              </>
-            ) : null}
-          </div>
-        </div>
 
-        <div className="mt-2 flex flex-wrap items-center gap-1.5">
-          {repo.reviewReason ? (
-            <Badge
-              variant="secondary"
-              className="rounded-full px-2 py-0.5 font-normal text-[11px]"
-              title={repo.reviewReason}
-            >
-              {repo.reviewReason}
-            </Badge>
-          ) : null}
-          {relevance != null ? (
-            <Badge
-              variant="secondary"
-              className="rounded-full px-2 py-0.5 font-normal text-[11px] text-muted-foreground"
-              title="Relevance vs top result"
-            >
-              {relevance}%
-            </Badge>
-          ) : null}
-          {repo.language ? (
-            <span className="inline-flex items-center gap-1.5 rounded-md bg-muted/80 px-2 py-0.5 text-[11px] text-foreground">
+          <div className="mt-2 flex flex-wrap items-center gap-1.5">
+            {repo.reviewReason ? (
+              <Badge
+                variant="secondary"
+                className="rounded-full px-2 py-0.5 font-normal text-[11px]"
+                title={repo.reviewReason}
+              >
+                {repo.reviewReason}
+              </Badge>
+            ) : null}
+            {relevance != null ? (
+              <Badge
+                variant="secondary"
+                className="rounded-full px-2 py-0.5 font-normal text-[11px] text-muted-foreground"
+                title="Relevance vs top result"
+              >
+                {relevance}%
+              </Badge>
+            ) : null}
+            {repo.language ? (
+              <span className="inline-flex items-center gap-1.5 rounded-md bg-muted/80 px-2 py-0.5 text-[11px] text-foreground">
+                <span
+                  className="size-2 rounded-full"
+                  style={{ backgroundColor: languageColor(repo.language) }}
+                />
+                {repo.language}
+              </span>
+            ) : null}
+            {topics.map((t) => (
               <span
-                className="size-2 rounded-full"
-                style={{ backgroundColor: languageColor(repo.language) }}
-              />
-              {repo.language}
-            </span>
-          ) : null}
-          {topics.map((t) => (
-            <span
-              key={t}
-              className="rounded-md bg-muted/60 px-2 py-0.5 text-[11px] text-muted-foreground"
-            >
-              {t}
-            </span>
-          ))}
-          {repo.archived ? (
-            <span className="rounded-md bg-amber-500/10 px-2 py-0.5 text-[11px] text-amber-800">
-              archived
-            </span>
-          ) : null}
-          {repo.unstarred ? (
-            <span className="rounded-md bg-rose-500/10 px-2 py-0.5 text-[11px] text-rose-800">
-              unstarred
-            </span>
-          ) : null}
-          {compact ? (
-            <span className="text-[11px] text-muted-foreground">
-              starred {formatRelative(repo.starredAt)}
-            </span>
-          ) : null}
-        </div>
-        {reviewMode ? (
-          <div className="mt-2">
-            <ReviewActions
-              repoId={repo.id}
-              htmlUrl={`https://github.com/${repo.fullName}`}
-            />
+                key={t}
+                className="rounded-md bg-muted/60 px-2 py-0.5 text-[11px] text-muted-foreground"
+              >
+                {t}
+              </span>
+            ))}
+            {repo.archived ? (
+              <span className="rounded-md bg-amber-500/10 px-2 py-0.5 text-[11px] text-amber-800">
+                archived
+              </span>
+            ) : null}
+            {repo.unstarred ? (
+              <span className="rounded-md bg-rose-500/10 px-2 py-0.5 text-[11px] text-rose-800">
+                unstarred
+              </span>
+            ) : null}
+            {compact ? (
+              <span className="text-[11px] text-muted-foreground">
+                starred {formatRelative(repo.starredAt)}
+              </span>
+            ) : null}
           </div>
-        ) : null}
-      </div>
+        </div>
+      </button>
+      {reviewMode ? (
+        <div className="flex shrink-0 items-start">
+          <ReviewActions
+            repoId={repo.id}
+            htmlUrl={`https://github.com/${repo.fullName}`}
+          />
+        </div>
+      ) : null}
     </div>
   );
 }

@@ -117,8 +117,7 @@ export function LibraryView() {
     queryFn: getReviewCounts,
   });
 
-  const extraFilters =
-    language != null || topic != null || categoryId != null;
+  const extraFilters = language != null || topic != null || categoryId != null;
   const emptyMessage = useMemo(() => {
     if (total > 0) {
       return null;
