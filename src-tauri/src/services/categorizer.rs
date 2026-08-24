@@ -1733,10 +1733,10 @@ mod tests {
         seed_repo(&conn, 13, "pending", false, "readme");
         point_ollama_at(&conn, &server.uri(), true);
 
-        assert!(!is_ollama_reachable_for_categorize(
-            &settings::get_settings(&conn).expect("settings")
-        )
-        .await);
+        assert!(
+            !is_ollama_reachable_for_categorize(&settings::get_settings(&conn).expect("settings"))
+                .await
+        );
 
         let assigned = auto_assign_uncategorized_if_reachable(&conn)
             .await
