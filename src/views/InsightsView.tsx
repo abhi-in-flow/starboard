@@ -31,16 +31,21 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { REVIEW_PRESETS } from "@/lib/review";
 import {
   getInsights,
   getInterestDriftDrilldown,
+  getReviewCounts,
   writeLibraryExport,
 } from "@/lib/tauri";
 import { cn } from "@/lib/utils";
+import { useUiStore } from "@/store/ui";
 import type {
   HeatmapCell,
   InsightsDateRange,
   InterestMetric,
+  ReviewCounts,
+  ReviewPreset,
   SharePoint,
 } from "@/types";
 
@@ -242,7 +247,69 @@ function StackedShareChart({
   );
 }
 
-function MetricsTable({ rows }: { rows: InterestMetric[] }) {
+function ReviewQueuesCard({
+  counts,
+  onOpen,
+}: {
+  counts: ReviewCounts | undefined;
+  onOpen: (preset: ReviewPreset) => void;
+}) {
+  const links: { preset: ReviewPreset; hint: string }[] = [
+    {
+      preset: "inactive",
+      hint: "Dormant repos — no push in 12+ months.",
+    },
+    {
+      preset: "archived",
+      hint: "Archived on GitHub, still starred.",
+    },
+    {
+      preset: "uncategorized",
+      hint: "Active stars without a real category.",
+    },
+  ];
+  return (
+    <SectionCard
+      title="Review queues"
+      description="Jump to Library review presets. Counts exclude reviewed and snoozed repos. Unstarred history is listed separately and is not an active count."
+    >
+      <div className="grid gap-2 sm:grid-cols-3">
+        {links.map(({ preset, hint }) => {
+          const meta = REVIEW_PRESETS.find((p) => p.id === preset);
+          const n = counts?.[preset];
+          return (
+            <button
+              key={preset}
+              type="button"
+              onClick={() => onOpen(preset)}
+              className="rounded-md border bg-muted/30 px-3 py-2 text-left transition-colors hover:bg-muted/60"
+            >
+              <p className="text-sm font-medium">{meta?.label ?? preset}</p>
+              <p className="mt-0.5 text-xs text-muted-foreground">{hint}</p>
+              <p className="mt-1 text-sm tabular-nums">
+                {n == null ? "—" : `${n.toLocaleString()} in queue`}
+              </p>
+            </button>
+          );
+        })}
+      </div>
+      {counts && counts.activeStars === 0 ? (
+        <p className="mt-3 text-xs text-muted-foreground">
+          Sync stars first. Review is local-only and never writes back to
+          GitHub.
+        </p>
+      ) : null}
+    </SectionCard>
+  );
+}
+
+function MetricsTable({
+  rows,
+  onDormant,
+}: {
+  rows: InterestMetric[];
+  onDormant?: () => void;
+}) {
   if (rows.length === 0) {
     return <EmptyHint>No category metrics for this range.</EmptyHint>;
   }
@@ -278,9 +345,24 @@ function MetricsTable({ rows }: { rows: InterestMetric[] }) {
                 {formatVelocity(row.lifetimeVelocity)}
               </td>
               <td className="py-2">
-                <Badge variant={badgeVariant(row.badge)} className="capitalize">
-                  {row.badge}
-                </Badge>
+                {row.badge === "dormant" && onDormant ? (
+                  <button type="button" onClick={onDormant}>
+                    <Badge
+                      variant={badgeVariant(row.badge)}
+                      className="capitalize"
+                      title="Open inactive review queue (no push in 12+ months)"
+                    >
+                      {row.badge}
+                    </Badge>
+                  </button>
+                ) : (
+                  <Badge
+                    variant={badgeVariant(row.badge)}
+                    className="capitalize"
+                  >
+                    {row.badge}
+                  </Badge>
+                )}
               </td>
             </tr>
           ))}
@@ -298,6 +380,7 @@ export function InsightsView() {
   const [drillCategory, setDrillCategory] = useState<string | null>(null);
   const [exporting, setExporting] = useState(false);
   const [exportError, setExportError] = useState<string | null>(null);
+  const openLibraryReview = useUiStore((s) => s.openLibraryReview);
 
   const range: InsightsDateRange = useMemo(() => {
     if (preset === "custom") {
@@ -329,6 +412,11 @@ export function InsightsView() {
     queryFn: () =>
       getInterestDriftDrilldown(drillCategory ?? "", range, offset),
     enabled: Boolean(drillCategory),
+  });
+
+  const reviewCounts = useQuery({
+    queryKey: ["reviewCounts"],
+    queryFn: getReviewCounts,
   });
 
   const dash = insightsQuery.data;
@@ -480,6 +568,11 @@ export function InsightsView() {
         </EmptyHint>
       ) : null}
 
+      <ReviewQueuesCard
+        counts={reviewCounts.data}
+        onOpen={(preset) => openLibraryReview({ preset })}
+      />
+
       {dash && dash.meta.totalStars > 0 ? (
         <div className="grid gap-4">
           <SectionCard
@@ -585,7 +678,10 @@ export function InsightsView() {
             title="Interest metrics"
             description="Rising = recent velocity &gt; 1.5× lifetime; Dormant = no stars in 6 months."
           >
-            <MetricsTable rows={dash.interestMetrics} />
+            <MetricsTable
+              rows={dash.interestMetrics}
+              onDormant={() => openLibraryReview({ preset: "inactive" })}
+            />
           </SectionCard>
 
           <SectionCard title="Fun facts">

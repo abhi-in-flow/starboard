@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.11.0 — Stale-star review
+
+- Library Review presets: Uncategorized, Archived (still starred), Inactive (no push in 12+ months), Possibly forgotten (starred 24+ months and no push in 18+ months), and Unstarred history.
+- Local Reviewed / Snooze (1 week, 1 month, 3 months, 6 months) via migration 004; queues order oldest/stale first and never write stars back to GitHub.
+- Insights deep-links Dormant / Archived / Uncategorized into matching Library review queues; presets compose with search and filters.
+
 ## 0.10.0 — Guided onboarding
 
 - First-run setup guide walks through GitHub PAT, initial sync, and optional Ollama / taxonomy / assignment / embeddings.

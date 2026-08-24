@@ -14,12 +14,14 @@ import {
 } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
 import { formatCount, formatRelative, languageColor } from "@/lib/format";
+import { SNOOZE_OPTIONS } from "@/lib/review";
 import {
   getOllamaStatus,
   getRepo,
   listCategories,
   recategorizeRepo,
   setRepoCategory,
+  setRepoReview,
 } from "@/lib/tauri";
 import { useUiStore } from "@/store/ui";
 import type { CategoryNode } from "@/types";
@@ -78,6 +80,16 @@ export function RepoDetailPanel({ repoId }: Props) {
       void queryClient.invalidateQueries({ queryKey: ["repo", repoId] });
       void queryClient.invalidateQueries({ queryKey: ["categories"] });
       void queryClient.invalidateQueries({ queryKey: ["repos"] });
+    },
+  });
+
+  const reviewMutation = useMutation({
+    mutationFn: setRepoReview,
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["repo", repoId] });
+      void queryClient.invalidateQueries({ queryKey: ["repos"] });
+      void queryClient.invalidateQueries({ queryKey: ["reviewCounts"] });
+      void queryClient.invalidateQueries({ queryKey: ["facets"] });
     },
   });
 
@@ -274,6 +286,69 @@ export function RepoDetailPanel({ repoId }: Props) {
                       "Re-categorize failed"}
                   </p>
                 ) : null}
+              </div>
+            </div>
+
+            <div>
+              <p className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                Review
+              </p>
+              <p className="mb-2 text-xs text-muted-foreground">
+                Local only — never stars or unstars on GitHub.
+              </p>
+              <div className="flex flex-wrap items-center gap-2">
+                {repo.reviewedAt ? (
+                  <Badge variant="secondary">
+                    Reviewed {formatRelative(repo.reviewedAt)}
+                  </Badge>
+                ) : null}
+                {repo.snoozedUntil ? (
+                  <Badge variant="outline">
+                    Snoozed until {repo.snoozedUntil.slice(0, 10)}
+                  </Badge>
+                ) : null}
+              </div>
+              <div className="mt-2 flex flex-wrap items-center gap-2">
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  disabled={
+                    reviewMutation.isPending || Boolean(repo.reviewedAt)
+                  }
+                  onClick={() =>
+                    reviewMutation.mutate({
+                      repoId,
+                      reviewed: true,
+                      snoozeDays: null,
+                    })
+                  }
+                >
+                  Mark reviewed
+                </Button>
+                <Select
+                  onValueChange={(v) => {
+                    const days = Number(v);
+                    if (Number.isFinite(days)) {
+                      reviewMutation.mutate({
+                        repoId,
+                        reviewed: null,
+                        snoozeDays: days,
+                      });
+                    }
+                  }}
+                >
+                  <SelectTrigger className="h-8 w-36">
+                    <SelectValue placeholder="Snooze…" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {SNOOZE_OPTIONS.map((opt) => (
+                      <SelectItem key={opt.days} value={String(opt.days)}>
+                        {opt.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
             </div>
 
