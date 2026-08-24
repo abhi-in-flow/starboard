@@ -277,19 +277,27 @@ async fn run_sync_inner(app: &AppHandle, full: bool) -> AppResult<SyncResult> {
 
 /// Start the README queue if there is pending work and no queue is already running.
 ///
-/// README-then-embed ordering: repo embed documents include `readme_excerpt`, which this
-/// queue fills after sync. Embedding first would immediately stale those rows. So we:
-/// - if no READMEs pending → kick `embed::spawn_embed_pipeline_if_needed` now;
-/// - if READMEs pending → run the queue, then kick auto-embed when it drains successfully.
+/// Orchestration order — README drain, then categorize + embed:
+/// Assignment prompts and embed documents both include `readme_excerpt`. Starting
+/// either job while this queue is still writing excerpts would categorize on
+/// incomplete docs and immediately stale embeddings. So we:
+/// - if no READMEs pending → kick auto-categorize and auto-embed now;
+/// - if READMEs pending → run the queue, then kick both when it drains successfully.
 ///
-/// Launch (`lib.rs` setup) and post-sync both enter through this function, so one hook covers
-/// both. Auto-embed is a silent no-op when Ollama is offline or nothing is stale.
+/// After the drain, categorization and embeddings may run concurrently: they use
+/// different Ollama endpoints (`/api/chat` vs `/api/embed`) and take the DB mutex
+/// only for short reads/writes (`repo_categories` vs `repo_embeddings` / vec0).
+/// Each is a silent no-op when its own preconditions fail (setting off, no
+/// taxonomy, Ollama offline, nothing pending, job already running).
+///
+/// Launch (`lib.rs` setup) and post-sync both enter through this function.
 pub fn spawn_readme_queue_if_needed(app: AppHandle) {
     let pending = match with_db(&app, count_pending_readmes) {
         Ok(n) => n,
         Err(_) => return,
     };
     if pending == 0 {
+        crate::services::categorizer::spawn_auto_categorize_if_needed(app.clone());
         crate::services::embed::spawn_embed_pipeline_if_needed(app);
         return;
     }
@@ -309,6 +317,7 @@ pub fn spawn_readme_queue_if_needed(app: AppHandle) {
         let _guard = RunningFlagGuard::holding(&state.readme_running);
         match run_readme_queue_task(app.clone()).await {
             Ok(_) => {
+                crate::services::categorizer::spawn_auto_categorize_if_needed(app.clone());
                 crate::services::embed::spawn_embed_pipeline_if_needed(app.clone());
             }
             Err(e) => {

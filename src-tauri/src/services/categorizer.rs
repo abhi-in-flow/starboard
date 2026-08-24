@@ -469,7 +469,7 @@ pub fn uncategorized_repos(conn: &Connection, limit: i64) -> AppResult<Vec<Assig
     Ok(out)
 }
 
-fn count_uncategorized(conn: &Connection) -> AppResult<i64> {
+pub fn count_uncategorized(conn: &Connection) -> AppResult<i64> {
     let count: i64 = conn.query_row(
         "SELECT COUNT(*) FROM repos r
          WHERE r.unstarred = 0
@@ -478,6 +478,11 @@ fn count_uncategorized(conn: &Connection) -> AppResult<i64> {
         |row| row.get(0),
     )?;
     Ok(count)
+}
+
+pub fn has_committed_taxonomy(conn: &Connection) -> AppResult<bool> {
+    let count: i64 = conn.query_row("SELECT COUNT(*) FROM categories", [], |row| row.get(0))?;
+    Ok(count > 0)
 }
 
 fn has_manual_category(conn: &Connection, repo_id: i64) -> AppResult<bool> {
@@ -556,8 +561,8 @@ fn apply_assignments(
 
     store::with_tx(conn, |tx| {
         for &repo_id in batch_ids {
-            // Defense in depth: never overwrite a manual override even if the
-            // caller failed to exclude the repo from the batch.
+            // Recheck at apply time: a manual override may have landed while the
+            // batch was in flight (or a caller passed a mixed id list).
             if has_manual_category(tx, repo_id)? {
                 continue;
             }
@@ -713,6 +718,138 @@ async fn assign_batch(
         .chat_json(ASSIGNMENT_SYSTEM_PROMPT, &user_prompt, assignment_schema())
         .await?;
     Ok(response.assignments)
+}
+
+/// Pure trigger gate for launch / post-README auto-assignment.
+/// Pending = active repos with no `repo_categories` row.
+pub fn should_attempt_auto_categorize(
+    setting_enabled: bool,
+    taxonomy_committed: bool,
+    ollama_available: bool,
+    pending_count: i64,
+    job_already_running: bool,
+) -> bool {
+    setting_enabled
+        && taxonomy_committed
+        && ollama_available
+        && pending_count > 0
+        && !job_already_running
+}
+
+/// Short, non-fatal Ollama probe for auto-categorize. Unreachable or missing
+/// chat model ⇒ false (Ollama is optional; never error the caller).
+pub async fn is_ollama_reachable_for_categorize(settings: &crate::models::AppSettings) -> bool {
+    match OllamaClient::from_settings(settings) {
+        Ok(client) => client
+            .health_check()
+            .await
+            .map(|s| s.available)
+            .unwrap_or(false),
+        Err(_) => false,
+    }
+}
+
+/// Background auto-assign: only new/uncategorized active repos, after README drain.
+/// Silent no-op when the setting is off, taxonomy is missing, Ollama is offline,
+/// nothing is pending, or assignment is already running.
+///
+/// Prefer calling this after the README queue drains (prompts include
+/// `readme_excerpt`); `sync::spawn_readme_queue_if_needed` is the post-sync /
+/// launch hook that does so. Embeddings may start in parallel — see that hook
+/// for the orchestration rationale.
+pub fn spawn_auto_categorize_if_needed(app: AppHandle) {
+    let settings = match with_db(&app, settings::get_settings) {
+        Ok(s) => s,
+        Err(_) => return,
+    };
+    if !settings.auto_categorize_after_sync {
+        return;
+    }
+    let taxonomy_committed = match with_db(&app, has_committed_taxonomy) {
+        Ok(v) => v,
+        Err(_) => return,
+    };
+    let pending = match with_db(&app, count_uncategorized) {
+        Ok(n) => n,
+        Err(_) => return,
+    };
+    let state = app.state::<CategorizeState>();
+    if state.running.load(Ordering::SeqCst) {
+        return;
+    }
+    if !should_attempt_auto_categorize(
+        settings.auto_categorize_after_sync,
+        taxonomy_committed,
+        true,
+        pending,
+        false,
+    ) {
+        return;
+    }
+
+    tauri::async_runtime::spawn(async move {
+        let settings = match with_db(&app, settings::get_settings) {
+            Ok(s) => s,
+            Err(_) => return,
+        };
+        let reachable = is_ollama_reachable_for_categorize(&settings).await;
+        let taxonomy_committed = match with_db(&app, has_committed_taxonomy) {
+            Ok(v) => v,
+            Err(_) => return,
+        };
+        let pending = match with_db(&app, count_uncategorized) {
+            Ok(n) => n,
+            Err(_) => return,
+        };
+        let running = app
+            .state::<CategorizeState>()
+            .running
+            .load(Ordering::SeqCst);
+        if !should_attempt_auto_categorize(
+            settings.auto_categorize_after_sync,
+            taxonomy_committed,
+            reachable,
+            pending,
+            running,
+        ) {
+            return;
+        }
+        let _ = run_assignment(app).await;
+    });
+}
+
+/// Testable auto-assign pass (no AppHandle): assigns only uncategorized active
+/// repos when the setting is on, a taxonomy is committed, and Ollama is up.
+/// Returns the number of repos written (0 = silent skip).
+#[cfg(test)]
+pub async fn auto_assign_uncategorized_if_reachable(conn: &Connection) -> AppResult<usize> {
+    let settings = settings::get_settings(conn)?;
+    let taxonomy = list_taxonomy_flat(conn)?;
+    let pending = count_uncategorized(conn)?;
+    let reachable = is_ollama_reachable_for_categorize(&settings).await;
+    if !should_attempt_auto_categorize(
+        settings.auto_categorize_after_sync,
+        !taxonomy.is_empty(),
+        reachable,
+        pending,
+        false,
+    ) {
+        return Ok(0);
+    }
+    let client = OllamaClient::from_settings(&settings)?;
+    let uncategorized_id = ensure_uncategorized(conn)?;
+    let mut assigned = 0usize;
+    loop {
+        let batch = uncategorized_repos(conn, ASSIGNMENT_BATCH_SIZE)?;
+        if batch.is_empty() {
+            break;
+        }
+        let batch_ids: Vec<i64> = batch.iter().map(|r| r.id).collect();
+        let assignments = assign_batch(&client, &taxonomy, &batch).await?;
+        apply_assignments(conn, &assignments, &taxonomy, uncategorized_id, &batch_ids)?;
+        assigned += batch_ids.len();
+    }
+    Ok(assigned)
 }
 
 /// Runs the full assignment pass over all uncategorized repos, in batches of 25,
@@ -882,8 +1019,12 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::models::{TaxonomyCategoryDraft, UpdateSettingsRequest};
+    use crate::services::settings;
     use crate::services::store::open_and_migrate;
     use std::time::{SystemTime, UNIX_EPOCH};
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
 
     fn test_conn() -> Connection {
         let nanos = SystemTime::now()
@@ -1258,5 +1399,352 @@ mod tests {
             .query_row("SELECT COUNT(*) FROM repo_categories", [], |r| r.get(0))
             .expect("assigns");
         assert_eq!(assigns, 0);
+    }
+
+    #[test]
+    fn apply_assignments_skips_manual_overrides() {
+        let conn = test_conn();
+        let taxonomy = taxonomy();
+        conn.execute(
+            "INSERT INTO categories (id, name, parent_id) VALUES
+             (1, 'AI/LLM', NULL), (99, 'Uncategorized', NULL)",
+            [],
+        )
+        .expect("seed categories");
+        conn.execute(
+            "INSERT INTO repos (id, full_name, owner, name, html_url, starred_at, fetched_at)
+             VALUES (5, 'o/r', 'o', 'r', 'https://x', '2024-01-01T00:00:00Z', '2024-01-01T00:00:00Z')",
+            [],
+        )
+        .expect("seed repo");
+        set_manual_category(&conn, 5, 1).expect("manual");
+
+        let items = vec![AssignmentItem {
+            repo_id: 5,
+            category: "Uncategorized".into(),
+            subcategory: None,
+            confidence: Some(0.1),
+        }];
+        apply_assignments(&conn, &items, &taxonomy, 99, &[5]).expect("apply");
+
+        let (category_id, source): (i64, String) = conn
+            .query_row(
+                "SELECT category_id, source FROM repo_categories WHERE repo_id = 5",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .expect("row");
+        assert_eq!(category_id, 1);
+        assert_eq!(source, "manual");
+    }
+
+    #[test]
+    fn should_attempt_auto_categorize_decision_matrix() {
+        // setting, taxonomy, ollama, pending, running → attempt
+        let cases = [
+            (true, true, true, 1, false, true),
+            (true, true, true, 50, false, true),
+            (false, true, true, 1, false, false),
+            (true, false, true, 1, false, false),
+            (true, true, false, 1, false, false),
+            (true, true, true, 0, false, false),
+            (true, true, true, 5, true, false),
+            (false, false, false, 0, true, false),
+        ];
+        for (enabled, taxonomy, ollama, pending, running, expected) in cases {
+            assert_eq!(
+                should_attempt_auto_categorize(enabled, taxonomy, ollama, pending, running),
+                expected,
+                "enabled={enabled} taxonomy={taxonomy} ollama={ollama} pending={pending} running={running}"
+            );
+        }
+    }
+
+    fn seed_repo(conn: &Connection, id: i64, name: &str, unstarred: bool, readme: &str) {
+        conn.execute(
+            "INSERT INTO repos (
+                id, full_name, owner, name, description, language, topics,
+                html_url, starred_at, readme_excerpt, fetched_at, unstarred
+             ) VALUES (
+                ?1, ?2, 'owner', ?3, ?4, 'Rust', '[]',
+                ?5, '2024-01-01T00:00:00Z', ?6, '2024-01-01T00:00:00Z', ?7
+             )",
+            rusqlite::params![
+                id,
+                format!("owner/{name}"),
+                name,
+                format!("desc for {name}"),
+                format!("https://github.com/owner/{name}"),
+                readme,
+                if unstarred { 1 } else { 0 },
+            ],
+        )
+        .expect("seed repo");
+    }
+
+    fn commit_test_taxonomy(conn: &Connection) {
+        commit_taxonomy(
+            conn,
+            &TaxonomyDraft {
+                categories: vec![TaxonomyCategoryDraft {
+                    name: "AI/LLM".into(),
+                    subcategories: vec!["Agent Frameworks".into()],
+                }],
+            },
+            false,
+        )
+        .expect("commit taxonomy");
+    }
+
+    fn point_ollama_at(conn: &Connection, base_url: &str, enabled: bool) {
+        settings::update_settings(
+            conn,
+            UpdateSettingsRequest {
+                ollama_base_url: Some(base_url.into()),
+                ollama_chat_model: Some("qwen3:14b".into()),
+                ollama_embed_model: None,
+                embed_dimension: None,
+                auto_categorize_after_sync: Some(enabled),
+            },
+        )
+        .expect("settings");
+    }
+
+    fn assignment_content(repo_id: i64, category: &str) -> String {
+        format!(
+            r#"{{"assignments":[{{"repo_id":{repo_id},"category":"{category}","subcategory":"Agent Frameworks","confidence":0.9}}]}}"#
+        )
+    }
+
+    fn assignment_content_multi(ids: &[i64], category: &str) -> String {
+        let items: Vec<String> = ids
+            .iter()
+            .map(|id| {
+                format!(
+                    r#"{{"repo_id":{id},"category":"{category}","subcategory":"Agent Frameworks","confidence":0.9}}"#
+                )
+            })
+            .collect();
+        format!(r#"{{"assignments":[{}]}}"#, items.join(","))
+    }
+
+    fn source_and_category(conn: &Connection, repo_id: i64) -> (String, i64) {
+        conn.query_row(
+            "SELECT source, category_id FROM repo_categories WHERE repo_id = ?1",
+            [repo_id],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
+        .expect("assignment row")
+    }
+
+    #[tokio::test]
+    async fn auto_categorize_post_sync_assigns_only_new_uncategorized() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/api/tags"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(serde_json::json!({ "models": [] })),
+            )
+            .mount(&server)
+            .await;
+        Mock::given(method("POST"))
+            .and(path("/api/chat"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "message": {
+                    "role": "assistant",
+                    "content": assignment_content_multi(&[3, 5], "AI/LLM")
+                }
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let conn = test_conn();
+        commit_test_taxonomy(&conn);
+        let ai_id: i64 = conn
+            .query_row(
+                "SELECT id FROM categories WHERE name = 'AI/LLM' AND parent_id IS NULL",
+                [],
+                |r| r.get(0),
+            )
+            .expect("ai");
+        let sub_id: i64 = conn
+            .query_row(
+                "SELECT id FROM categories WHERE name = 'Agent Frameworks'",
+                [],
+                |r| r.get(0),
+            )
+            .expect("sub");
+
+        // Pre-sync: one LLM assignment, one manual. Post-sync adds 3 + 5;
+        // repo 4 is unstarred leftover and must stay untouched.
+        seed_repo(&conn, 1, "already-llm", false, "readme one");
+        seed_repo(&conn, 2, "manual-keep", false, "readme two");
+        seed_repo(&conn, 3, "new-a", false, "readme three");
+        seed_repo(&conn, 4, "gone", true, "readme four");
+        seed_repo(&conn, 5, "new-b", false, "readme five");
+
+        conn.execute(
+            "INSERT INTO repo_categories (repo_id, category_id, source, confidence)
+             VALUES (1, ?1, 'llm', 0.8)",
+            [ai_id],
+        )
+        .expect("llm prior");
+        set_manual_category(&conn, 2, sub_id).expect("manual");
+
+        point_ollama_at(&conn, &server.uri(), true);
+
+        let assigned = auto_assign_uncategorized_if_reachable(&conn)
+            .await
+            .expect("auto");
+        assert_eq!(assigned, 2);
+
+        let (src1, cat1) = source_and_category(&conn, 1);
+        assert_eq!(src1, "llm");
+        assert_eq!(cat1, ai_id);
+
+        let (src2, cat2) = source_and_category(&conn, 2);
+        assert_eq!(src2, "manual");
+        assert_eq!(cat2, sub_id);
+
+        let (src3, _) = source_and_category(&conn, 3);
+        assert_eq!(src3, "llm");
+        let (src5, _) = source_and_category(&conn, 5);
+        assert_eq!(src5, "llm");
+
+        let gone: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM repo_categories WHERE repo_id = 4",
+                [],
+                |r| r.get(0),
+            )
+            .expect("unstarred");
+        assert_eq!(gone, 0);
+    }
+
+    #[tokio::test]
+    async fn auto_categorize_relaunch_resumes_eligible_uncategorized() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/api/tags"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(serde_json::json!({ "models": [] })),
+            )
+            .mount(&server)
+            .await;
+        Mock::given(method("POST"))
+            .and(path("/api/chat"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "message": {
+                    "role": "assistant",
+                    "content": assignment_content(10, "AI/LLM")
+                }
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let conn = test_conn();
+        commit_test_taxonomy(&conn);
+        // Leftover from a previous session: README already drained, still uncategorized.
+        seed_repo(&conn, 10, "leftover", false, "final readme excerpt");
+        point_ollama_at(&conn, &server.uri(), true);
+
+        let assigned = auto_assign_uncategorized_if_reachable(&conn)
+            .await
+            .expect("resume");
+        assert_eq!(assigned, 1);
+        let (source, _) = source_and_category(&conn, 10);
+        assert_eq!(source, "llm");
+    }
+
+    #[tokio::test]
+    async fn auto_categorize_noop_when_disabled() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/api/chat"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "message": { "role": "assistant", "content": "{\"assignments\":[]}" }
+            })))
+            .expect(0)
+            .mount(&server)
+            .await;
+
+        let conn = test_conn();
+        commit_test_taxonomy(&conn);
+        seed_repo(&conn, 11, "pending", false, "readme");
+        point_ollama_at(&conn, &server.uri(), false);
+
+        let assigned = auto_assign_uncategorized_if_reachable(&conn)
+            .await
+            .expect("skip");
+        assert_eq!(assigned, 0);
+        let count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM repo_categories", [], |r| r.get(0))
+            .expect("count");
+        assert_eq!(count, 0);
+    }
+
+    #[tokio::test]
+    async fn auto_categorize_noop_when_no_taxonomy() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/api/chat"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "message": { "role": "assistant", "content": "{\"assignments\":[]}" }
+            })))
+            .expect(0)
+            .mount(&server)
+            .await;
+
+        let conn = test_conn();
+        seed_repo(&conn, 12, "pending", false, "readme");
+        point_ollama_at(&conn, &server.uri(), true);
+
+        let assigned = auto_assign_uncategorized_if_reachable(&conn)
+            .await
+            .expect("skip");
+        assert_eq!(assigned, 0);
+        let count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM repo_categories", [], |r| r.get(0))
+            .expect("count");
+        assert_eq!(count, 0);
+    }
+
+    #[tokio::test]
+    async fn auto_categorize_noop_when_ollama_offline() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/api/tags"))
+            .respond_with(ResponseTemplate::new(503))
+            .mount(&server)
+            .await;
+        Mock::given(method("POST"))
+            .and(path("/api/chat"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "message": { "role": "assistant", "content": "{\"assignments\":[]}" }
+            })))
+            .expect(0)
+            .mount(&server)
+            .await;
+
+        let conn = test_conn();
+        commit_test_taxonomy(&conn);
+        seed_repo(&conn, 13, "pending", false, "readme");
+        point_ollama_at(&conn, &server.uri(), true);
+
+        assert!(
+            !is_ollama_reachable_for_categorize(&settings::get_settings(&conn).expect("settings"))
+                .await
+        );
+
+        let assigned = auto_assign_uncategorized_if_reachable(&conn)
+            .await
+            .expect("skip");
+        assert_eq!(assigned, 0);
+        let count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM repo_categories", [], |r| r.get(0))
+            .expect("count");
+        assert_eq!(count, 0);
     }
 }

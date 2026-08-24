@@ -15,6 +15,7 @@ pub const KEY_INCREMENTAL_SINCE_RECONCILE: &str = "incremental_syncs_since_recon
 pub const KEY_EMBED_DIMENSION: &str = "embed_dimension";
 /// Dimension the live `repo_embeddings` vec0 table was created with.
 pub const KEY_EMBEDDINGS_TABLE_DIMENSION: &str = "embeddings_table_dimension";
+const KEY_AUTO_CATEGORIZE_AFTER_SYNC: &str = "auto_categorize_after_sync";
 
 pub fn get_settings(conn: &Connection) -> AppResult<AppSettings> {
     let defaults = AppSettings::default();
@@ -27,7 +28,22 @@ pub fn get_settings(conn: &Connection) -> AppResult<AppSettings> {
         embed_dimension: get_embed_dimension(conn)?,
         github_username: get_value(conn, KEY_GITHUB_USERNAME)?,
         embeddings_need_rebuild: embeddings_need_rebuild(conn)?,
+        auto_categorize_after_sync: parse_bool_flag(
+            get_value(conn, KEY_AUTO_CATEGORIZE_AFTER_SYNC)?,
+            defaults.auto_categorize_after_sync,
+        ),
     })
+}
+
+/// Missing key → `default` (ON for `auto_categorize_after_sync` so new installs
+/// and upgrades without the key get the HLD post-sync assignment behavior).
+fn parse_bool_flag(raw: Option<String>, default: bool) -> bool {
+    match raw.as_deref().map(str::trim) {
+        None => default,
+        Some(v) if v.eq_ignore_ascii_case("true") || v == "1" => true,
+        Some(v) if v.eq_ignore_ascii_case("false") || v == "0" => false,
+        Some(_) => default,
+    }
 }
 
 pub fn get_embed_dimension(conn: &Connection) -> AppResult<i64> {
@@ -94,6 +110,13 @@ pub fn update_settings(conn: &Connection, req: UpdateSettingsRequest) -> AppResu
                 )));
             }
             set_value(tx, KEY_EMBED_DIMENSION, &dimension.to_string())?;
+        }
+        if let Some(flag) = req.auto_categorize_after_sync {
+            set_value(
+                tx,
+                KEY_AUTO_CATEGORIZE_AFTER_SYNC,
+                if flag { "true" } else { "false" },
+            )?;
         }
         Ok(())
     })?;
@@ -181,6 +204,10 @@ mod tests {
         assert_eq!(settings.embed_dimension, 768);
         assert!(!settings.embeddings_need_rebuild);
         assert!(settings.github_username.is_none());
+        assert!(
+            settings.auto_categorize_after_sync,
+            "missing key defaults ON for new installs and upgrades"
+        );
 
         let updated = update_settings(
             &conn,
@@ -189,6 +216,7 @@ mod tests {
                 ollama_chat_model: Some("qwen3:14b".into()),
                 ollama_embed_model: None,
                 embed_dimension: Some(1024),
+                auto_categorize_after_sync: Some(false),
             },
         )
         .expect("update");
@@ -198,6 +226,12 @@ mod tests {
         assert_eq!(updated.ollama_embed_model, "nomic-embed-text");
         assert_eq!(updated.embed_dimension, 1024);
         assert!(updated.embeddings_need_rebuild);
+        assert!(!updated.auto_categorize_after_sync);
+        assert!(
+            !get_settings(&conn)
+                .expect("reload")
+                .auto_categorize_after_sync
+        );
     }
 
     #[test]
@@ -210,6 +244,7 @@ mod tests {
                 ollama_chat_model: None,
                 ollama_embed_model: None,
                 embed_dimension: Some(384),
+                auto_categorize_after_sync: None,
             },
         )
         .expect("update");
