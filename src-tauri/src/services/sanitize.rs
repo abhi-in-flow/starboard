@@ -8,8 +8,12 @@ pub fn is_safe_markdown_url(raw: &str) -> bool {
     if trimmed.starts_with('#') {
         return !trimmed.contains(':');
     }
-    // Protocol-relative and path-relative links stay on GitHub pages; allow.
-    if trimmed.starts_with('/') && !trimmed.starts_with("//") {
+    // Protocol-relative URLs are not a known safe origin in the desktop shell.
+    if trimmed.starts_with("//") {
+        return false;
+    }
+    // Path-relative links stay on GitHub pages; allow.
+    if trimmed.starts_with('/') {
         return true;
     }
     let Some((scheme, rest)) = trimmed.split_once(':') else {
@@ -47,5 +51,10 @@ mod tests {
         assert!(!is_safe_markdown_url("file:///etc/passwd"));
         assert!(!is_safe_markdown_url("vbscript:msgbox"));
         assert!(!is_safe_markdown_url(""));
+        assert!(!is_safe_markdown_url("http:javascript:alert(1)"));
+        assert!(!is_safe_markdown_url(
+            "https://example.com/x?next=javascript:alert(1)"
+        ));
+        assert!(!is_safe_markdown_url("//evil.example/payload"));
     }
 }

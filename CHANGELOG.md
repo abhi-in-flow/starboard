@@ -4,8 +4,8 @@
 
 - SQLite WAL/FK/busy_timeout/`synchronous=NORMAL`, transactional sync/taxonomy/embed/auth writes, ETag persisted only after apply commits, orphaned `sync_log` reconciliation, and migration 003 indexes plus README/document-hash columns.
 - Request timeouts, bounded GitHub rate-limit waits, and cancellable sync/README/embed/categorize jobs with UI Cancel.
-- Incremental sync never claims unstar detection; periodic full reconcile; README 404 vs transient retry; cheap embed-status via persisted hashes; paginated browse/search.
-- Scrubbed logging, Ollama URL and Markdown URL sanitization, non-null Tauri CSP, safer export paths, Settings DB integrity check, GitHub Actions CI, and release-readiness docs (signing/updater remain external).
+- Incremental sync never claims unstar detection; periodic full reconcile; README one-sweep with 404 vs transient retry; cheap embed-status via persisted hashes; paginated browse/search.
+- Scrubbed `log` sink at startup, Ollama/Markdown URL sanitization, non-null Tauri CSP, export-dialog path hygiene, Settings DB integrity check, and GitHub Actions CI with Tauri Linux deps (signing/updater remain external).
 
 ## 0.7.0
 

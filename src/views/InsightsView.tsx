@@ -371,6 +371,10 @@ export function InsightsView() {
           <p className="text-sm text-muted-foreground">
             When you star, what you are into, and how that has shifted.
           </p>
+          <p className="text-xs text-muted-foreground">
+            Export writes to the path you pick in the save dialog. Extension and
+            path checks are validation hygiene, not a filesystem sandbox.
+          </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <Button

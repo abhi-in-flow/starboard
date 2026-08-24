@@ -19,4 +19,16 @@ describe("isSafeMarkdownUrl", () => {
     expect(isSafeMarkdownUrl("")).toBe(false);
     expect(safeMarkdownUrl("javascript:alert(1)")).toBeNull();
   });
+
+  test("blocks embedded javascript and protocol-relative URLs", () => {
+    expect(isSafeMarkdownUrl("http:javascript:alert(1)")).toBe(false);
+    expect(
+      isSafeMarkdownUrl("https://example.com/x?next=javascript:alert(1)"),
+    ).toBe(false);
+    expect(isSafeMarkdownUrl("//evil.example/payload")).toBe(false);
+    expect(safeMarkdownUrl("//evil.example/payload")).toBeNull();
+    expect(safeMarkdownUrl("https://github.com/o/r")).toBe(
+      "https://github.com/o/r",
+    );
+  });
 });

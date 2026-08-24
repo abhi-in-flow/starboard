@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { listen } from "@tauri-apps/api/event";
 import { LayoutGrid, List, Search, X } from "lucide-react";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -14,6 +14,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { isCancelledMessage } from "@/lib/jobStatus";
 import {
   cancelEmbedding,
   getEmbedStatus,
@@ -117,10 +118,43 @@ export function LibraryToolbar({ searchRef, total, searchHint }: Props) {
     setSearchModeInitialized,
   ]);
 
+  const [jobNotice, setJobNotice] = useState<string | null>(null);
+  const [jobError, setJobError] = useState<string | null>(null);
+
   const startEmbedMutation = useMutation({
     mutationFn: startEmbedding,
     onSuccess: () => {
+      setJobNotice(null);
+      setJobError(null);
       void queryClient.invalidateQueries({ queryKey: ["embedStatus"] });
+    },
+    onError: (err) => {
+      const message =
+        err && typeof err === "object" && "message" in err
+          ? String((err as { message: unknown }).message)
+          : "Embedding failed";
+      if (isCancelledMessage(message)) {
+        setJobNotice(message);
+        setJobError(null);
+      } else {
+        setJobError(message);
+      }
+    },
+  });
+
+  const cancelEmbedMutation = useMutation({
+    mutationFn: cancelEmbedding,
+    onSuccess: () => {
+      setJobNotice("Cancelled");
+      setJobError(null);
+      void queryClient.invalidateQueries({ queryKey: ["embedStatus"] });
+    },
+    onError: (err) => {
+      const message =
+        err && typeof err === "object" && "message" in err
+          ? String((err as { message: unknown }).message)
+          : "Cancel failed";
+      setJobError(message);
     },
   });
 
@@ -259,14 +293,17 @@ export function LibraryToolbar({ searchRef, total, searchHint }: Props) {
               size="sm"
               variant="outline"
               className="h-7 px-2 text-xs"
-              onClick={() => {
-                void cancelEmbedding().then(() =>
-                  queryClient.invalidateQueries({ queryKey: ["embedStatus"] }),
-                );
-              }}
+              disabled={cancelEmbedMutation.isPending}
+              onClick={() => cancelEmbedMutation.mutate()}
             >
               Cancel
             </Button>
+          ) : null}
+          {jobNotice ? <span>{jobNotice}</span> : null}
+          {jobError ? (
+            <span className="text-destructive" role="alert">
+              {jobError}
+            </span>
           ) : null}
           {embedStatus.data?.needRebuild ? (
             <Badge variant="secondary">

@@ -1,4 +1,4 @@
-/** Allow http/https (and in-page hashes / relative paths). Block javascript/data/file. */
+/** Allow http/https, in-page hashes, and safe relative paths. Block dangerous schemes. */
 export function isSafeMarkdownUrl(raw: string | undefined | null): boolean {
   if (!raw) {
     return false;
@@ -10,7 +10,11 @@ export function isSafeMarkdownUrl(raw: string | undefined | null): boolean {
   if (trimmed.startsWith("#") && !trimmed.includes(":")) {
     return true;
   }
-  if (trimmed.startsWith("/") && !trimmed.startsWith("//")) {
+  // Protocol-relative is not a known safe origin in the desktop shell.
+  if (trimmed.startsWith("//")) {
+    return false;
+  }
+  if (trimmed.startsWith("/")) {
     return true;
   }
   const colon = trimmed.indexOf(":");
@@ -26,7 +30,14 @@ export function isSafeMarkdownUrl(raw: string | undefined | null): boolean {
   ) {
     return false;
   }
-  return scheme === "http" || scheme === "https";
+  if (scheme !== "http" && scheme !== "https") {
+    return false;
+  }
+  const rest = trimmed.slice(colon + 1);
+  if (rest.toLowerCase().startsWith("//javascript")) {
+    return false;
+  }
+  return !trimmed.toLowerCase().includes("javascript:");
 }
 
 export function safeMarkdownUrl(raw: string | undefined | null): string | null {

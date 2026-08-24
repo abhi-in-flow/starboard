@@ -221,11 +221,14 @@ pub fn build_filter_clause(
 
 pub fn order_by_clause(sort: &RepoSort, desc: bool, fts_rank: bool) -> String {
     let dir = if desc { "DESC" } else { "ASC" };
+    // Unique id tie-breaker keeps LIMIT/OFFSET pages stable when the primary
+    // key (especially starred_at) is equal. Primary sort semantics are unchanged.
+    let tie = "r.id ASC";
     let secondary = match sort {
-        RepoSort::StarredAt => format!("r.starred_at {dir}"),
-        RepoSort::Stars => format!("COALESCE(r.stars_count, -1) {dir}, r.full_name ASC"),
-        RepoSort::PushedAt => format!("COALESCE(r.pushed_at, '') {dir}, r.full_name ASC"),
-        RepoSort::Name => format!("r.full_name {dir}"),
+        RepoSort::StarredAt => format!("r.starred_at {dir}, {tie}"),
+        RepoSort::Stars => format!("COALESCE(r.stars_count, -1) {dir}, r.full_name ASC, {tie}"),
+        RepoSort::PushedAt => format!("COALESCE(r.pushed_at, '') {dir}, r.full_name ASC, {tie}"),
+        RepoSort::Name => format!("r.full_name {dir}, {tie}"),
     };
     if fts_rank {
         format!("ORDER BY rank ASC, {secondary}")
@@ -421,5 +424,62 @@ mod tests {
         assert_eq!(page2.items.len(), 1);
         assert_eq!(page2.items[0].full_name, "owner/delta");
         assert_ne!(page1.items[0].id, page2.items[0].id);
+    }
+
+    fn sample_starred(id: i64, name: &str, starred_at: &str) -> StarredRepo {
+        let mut repo = sample(id, name, "Rust", 1);
+        repo.starred_at = starred_at.into();
+        repo
+    }
+
+    #[test]
+    fn pagination_tie_breaks_equal_starred_at_without_skip_or_dup() {
+        let conn = test_conn();
+        let ts = "2024-06-01T12:00:00Z";
+        apply_full_diff(
+            &conn,
+            &[
+                sample_starred(10, "zulu", ts),
+                sample_starred(2, "alpha", ts),
+                sample_starred(7, "mike", ts),
+            ],
+        )
+        .expect("seed");
+
+        let page1 = list_repos(
+            &conn,
+            ListReposRequest {
+                filters: None,
+                sort: Some(RepoSort::StarredAt),
+                sort_desc: Some(true),
+                limit: Some(2),
+                offset: Some(0),
+            },
+        )
+        .expect("p1");
+        let page2 = list_repos(
+            &conn,
+            ListReposRequest {
+                filters: None,
+                sort: Some(RepoSort::StarredAt),
+                sort_desc: Some(true),
+                limit: Some(2),
+                offset: Some(2),
+            },
+        )
+        .expect("p2");
+
+        assert_eq!(page1.total, 3);
+        assert_eq!(page1.items.len(), 2);
+        assert_eq!(page2.items.len(), 1);
+        let ids1: Vec<i64> = page1.items.iter().map(|r| r.id).collect();
+        let ids2: Vec<i64> = page2.items.iter().map(|r| r.id).collect();
+        assert!(
+            ids1.iter().all(|id| !ids2.contains(id)),
+            "page boundary must not duplicate ids: {ids1:?} vs {ids2:?}"
+        );
+        // Equal starred_at → stable id ASC tie-break: 2, 7, then 10.
+        assert_eq!(ids1, vec![2, 7]);
+        assert_eq!(ids2, vec![10]);
     }
 }

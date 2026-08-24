@@ -12,6 +12,7 @@ endpoints in the repository.
 - [x] Non-null Tauri CSP for local assets + IPC
 - [x] PAT stays in the OS keyring; logs are scrubbed
 - [x] Settings → Status database integrity check
+- [x] Export path checks around the native save dialog (validation/hygiene, not a sandbox)
 
 ## Externally blocked (do not invent values)
 

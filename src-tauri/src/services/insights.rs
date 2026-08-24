@@ -74,8 +74,8 @@ pub fn write_export_file(path: &str, content: &str) -> AppResult<()> {
         .map_err(|e| AppError::new("io_error", format!("failed to write export: {e}")))
 }
 
-/// Only absolute, non-traversing paths with an expected export extension.
-/// Parent directory must already exist (save-dialog contract).
+/// Validation/hygiene around a native save-dialog path — not a filesystem sandbox.
+/// Rejects relative paths, `..`, and unexpected extensions. Parent must exist.
 pub fn validate_export_path(path: &str, format: Option<&str>) -> AppResult<PathBuf> {
     let trimmed = path.trim();
     if trimmed.is_empty() {
