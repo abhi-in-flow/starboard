@@ -28,7 +28,9 @@ impl OllamaClient {
         if model.is_empty() {
             return Err(AppError::ollama("set a chat model in Settings"));
         }
-        let client = Client::builder().build()?;
+        let client = Client::builder()
+            .connect_timeout(Duration::from_secs(10))
+            .build()?;
         Ok(Self {
             client,
             base_url: base_url.into().trim_end_matches('/').to_string(),
@@ -49,7 +51,9 @@ impl OllamaClient {
         if model.is_empty() {
             return Err(AppError::ollama("set an embed model in Settings"));
         }
-        let client = Client::builder().build()?;
+        let client = Client::builder()
+            .connect_timeout(Duration::from_secs(10))
+            .build()?;
         Ok(Self {
             client,
             base_url: settings.ollama_base_url.trim_end_matches('/').to_string(),

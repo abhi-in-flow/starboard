@@ -3661,6 +3661,7 @@ dependencies = [
  "base64 0.22.1",
  "futures",
  "keyring",
+ "log",
  "rand 0.8.6",
  "regex",
  "reqwest 0.12.28",

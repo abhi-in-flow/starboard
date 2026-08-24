@@ -1,6 +1,6 @@
 # CLAUDE.md — Starboard
 
-Local-first Tauri desktop app that syncs the user's GitHub starred repos into SQLite, auto-categorizes them with a local LLM (Ollama), and provides search + stats. Full design lives in `docs/HLD.md` — read the relevant section before starting any task.
+Local-first Tauri desktop app that syncs the user's GitHub starred repos into SQLite, auto-categorizes them with a local LLM (Ollama), and provides search + stats. Full design lives in `docs/architecture/starboard-hld-and-plan.md` (stub: `docs/HLD.md`) — read the relevant section before starting any task.
 
 ## Stack (locked — do not substitute)
 
@@ -21,7 +21,7 @@ src-tauri/src/
   commands/           # #[tauri::command] handlers — thin marshaling only
   services/           # ALL business logic lives here, unit-tested here
   models.rs
-docs/HLD.md           # source of truth for design
+docs/architecture/starboard-hld-and-plan.md  # source of truth for design
 tasks/                # phase task prompts
 ```
 
@@ -44,9 +44,10 @@ tasks/                # phase task prompts
 # dev
 bun install && bun run tauri dev
 # checks — ALL must be clean before done
-cargo clippy --manifest-path src-tauri/Cargo.toml -- -D warnings
+cargo fmt    --manifest-path src-tauri/Cargo.toml -- --check
+cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
 cargo test   --manifest-path src-tauri/Cargo.toml
-bun run lint && bunx tsc --noEmit
+bun run lint && bunx tsc --noEmit && bun run build
 ```
 
 ## Testing minimums

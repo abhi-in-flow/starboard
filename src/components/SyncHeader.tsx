@@ -3,22 +3,19 @@ import { listen } from "@tauri-apps/api/event";
 import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import {
+  classifyJobFailure,
+  errorMessage,
+  isCancelledMessage,
+} from "@/lib/jobStatus";
+import {
+  cancelReadmeQueue,
+  cancelSync,
   getAuthStatus,
   getSyncStatus,
   resumeReadmeQueue,
   startSync,
 } from "@/lib/tauri";
-import type { AppError, SyncProgress } from "@/types";
-
-function errorMessage(err: unknown): string {
-  if (err && typeof err === "object" && "message" in err) {
-    return String((err as AppError).message);
-  }
-  if (err instanceof Error) {
-    return err.message;
-  }
-  return "Sync failed";
-}
+import type { SyncProgress } from "@/types";
 
 function formatRelative(iso: string | null | undefined): string {
   if (!iso) {
@@ -48,6 +45,7 @@ export function SyncHeader() {
   const queryClient = useQueryClient();
   const [progress, setProgress] = useState<SyncProgress | null>(null);
   const [syncError, setSyncError] = useState<string | null>(null);
+  const [syncNotice, setSyncNotice] = useState<string | null>(null);
 
   const authQuery = useQuery({
     queryKey: ["authStatus"],
@@ -69,7 +67,13 @@ export function SyncHeader() {
       const payload = event.payload;
       setProgress(payload);
       if (payload.error) {
-        setSyncError(payload.error);
+        if (isCancelledMessage(payload.error)) {
+          setSyncNotice(payload.error);
+          setSyncError(null);
+        } else {
+          setSyncError(payload.error);
+          setSyncNotice(null);
+        }
       } else if (
         payload.kind === "readme" &&
         !payload.message.includes("paused")
@@ -95,6 +99,7 @@ export function SyncHeader() {
     mutationFn: (full: boolean) => startSync(full),
     onMutate: () => {
       setSyncError(null);
+      setSyncNotice(null);
       setProgress({
         kind: "incremental",
         current: 0,
@@ -107,8 +112,15 @@ export function SyncHeader() {
       void queryClient.invalidateQueries({ queryKey: ["syncStatus"] });
     },
     onError: (err) => {
+      const outcome = classifyJobFailure(err, "Sync failed");
       setProgress(null);
-      setSyncError(errorMessage(err));
+      if (outcome.kind === "cancelled") {
+        setSyncNotice(outcome.message);
+        setSyncError(null);
+      } else {
+        setSyncError(outcome.message);
+        setSyncNotice(null);
+      }
       void queryClient.invalidateQueries({ queryKey: ["syncStatus"] });
     },
   });
@@ -117,6 +129,7 @@ export function SyncHeader() {
     mutationFn: resumeReadmeQueue,
     onMutate: () => {
       setSyncError(null);
+      setSyncNotice(null);
       setProgress({
         kind: "readme",
         current: 0,
@@ -129,7 +142,14 @@ export function SyncHeader() {
       void queryClient.invalidateQueries({ queryKey: ["syncStatus"] });
     },
     onError: (err) => {
-      setSyncError(errorMessage(err));
+      const outcome = classifyJobFailure(err, "Sync failed");
+      if (outcome.kind === "cancelled") {
+        setSyncNotice(outcome.message);
+        setSyncError(null);
+      } else {
+        setSyncError(outcome.message);
+        setSyncNotice(null);
+      }
       void queryClient.invalidateQueries({ queryKey: ["syncStatus"] });
     },
   });
@@ -142,6 +162,18 @@ export function SyncHeader() {
     (progress?.kind === "readme" &&
       !progress.error &&
       !progress.message.startsWith("README queue complete"));
+  const cancelMutation = useMutation({
+    mutationFn: () => (listSyncing ? cancelSync() : cancelReadmeQueue()),
+    onSuccess: () => {
+      setSyncNotice("Cancelled");
+      setSyncError(null);
+      void queryClient.invalidateQueries({ queryKey: ["syncStatus"] });
+    },
+    onError: (err) => {
+      // Cancel-command failures (e.g. nothing running) stay destructive.
+      setSyncError(errorMessage(err, "Cancel failed"));
+    },
+  });
   const pendingReadmes = syncQuery.data?.pendingReadmes ?? 0;
   const showResume =
     connected && !listSyncing && !readmeRunning && pendingReadmes > 0;
@@ -185,6 +217,21 @@ export function SyncHeader() {
               {pct !== null ? ` (${pct}%)` : ""}
             </p>
           ) : null}
+          {syncQuery.data?.unstarPolicy ? (
+            <p
+              className="truncate text-xs text-muted-foreground"
+              title={syncQuery.data.unstarPolicy}
+            >
+              {syncQuery.data.reconcileDue
+                ? "Next Sync will run a full reconcile to detect unstars."
+                : "Incremental Sync does not detect unstars — use Full sync, or wait for the automatic 7-day reconcile."}
+            </p>
+          ) : null}
+          {syncNotice ? (
+            <p className="text-xs text-muted-foreground" title={syncNotice}>
+              {syncNotice}
+            </p>
+          ) : null}
           {syncError ? (
             <p
               className="text-xs text-destructive"
@@ -196,6 +243,17 @@ export function SyncHeader() {
           ) : null}
         </div>
         <div className="flex shrink-0 gap-2">
+          {listSyncing || readmeRunning ? (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              disabled={cancelMutation.isPending}
+              onClick={() => cancelMutation.mutate()}
+            >
+              Cancel
+            </Button>
+          ) : null}
           {showResume ? (
             <Button
               type="button"

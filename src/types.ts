@@ -50,6 +50,16 @@ export type SyncStatus = {
   pendingReadmes: number;
   lastSyncedAt: string | null;
   lastResult: SyncResult | null;
+  lastFullReconcileAt?: string | null;
+  reconcileDue?: boolean;
+  unstarPolicy?: string;
+};
+
+export type IntegrityReport = {
+  ok: boolean;
+  integrity: string;
+  foreignKeyViolations: number;
+  checkedAt: string;
 };
 
 export type RepoSort = "starredAt" | "stars" | "pushedAt" | "name";
@@ -316,4 +326,5 @@ export type CategorizationPanel = {
 export type SystemStatus = {
   embeddings: EmbeddingsPanel;
   categorization: CategorizationPanel;
+  integrity?: IntegrityReport | null;
 };

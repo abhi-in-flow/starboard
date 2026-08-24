@@ -3,37 +3,42 @@ import type { Components } from "react-markdown";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { prepareReadmeExcerpt } from "@/lib/readme";
+import { safeMarkdownUrl } from "@/lib/safeUrl";
 
 const components: Components = {
   a: ({ href, children }) => {
     const text = String(children ?? "").trim();
+    const safe = safeMarkdownUrl(href);
     // Skip empty badge/shield links left after image stripping.
-    if (!text && !href) {
+    if (!text && !safe) {
       return null;
+    }
+    if (!safe) {
+      return <span>{children ?? href}</span>;
     }
     return (
       <button
         type="button"
         className="text-primary underline underline-offset-2 hover:opacity-80"
         onClick={() => {
-          if (href) {
-            void openUrl(href);
-          }
+          void openUrl(safe);
         }}
       >
-        {children ?? href}
+        {children ?? safe}
       </button>
     );
   },
-  img: ({ src, alt }) =>
-    src ? (
+  img: ({ src, alt }) => {
+    const safe = safeMarkdownUrl(src);
+    return safe ? (
       <img
-        src={src}
+        src={safe}
         alt={alt ?? ""}
         className="my-2 max-h-40 max-w-full rounded-md border border-border object-contain"
         loading="lazy"
       />
-    ) : null,
+    ) : null;
+  },
   code: ({ className, children, ...props }) => {
     const isBlock = Boolean(className?.includes("language-"));
     if (isBlock) {

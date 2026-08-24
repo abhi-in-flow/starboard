@@ -65,6 +65,15 @@ pub struct SyncStatus {
     pub pending_readmes: i64,
     pub last_synced_at: Option<String>,
     pub last_result: Option<SyncResult>,
+    /// Last time a full starred-list walk (unstar-capable) completed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_full_reconcile_at: Option<String>,
+    /// True when the next incremental Sync will be promoted to a full reconcile.
+    #[serde(default)]
+    pub reconcile_due: bool,
+    /// User-visible incremental/unstar policy (never claims incremental detects unstars).
+    #[serde(default)]
+    pub unstar_policy: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -514,12 +523,24 @@ pub struct LibraryExport {
     pub json: String,
 }
 
+/// Result of `PRAGMA integrity_check` + foreign-key check (Settings → Status).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct IntegrityReport {
+    pub ok: bool,
+    pub integrity: String,
+    pub foreign_key_violations: i64,
+    pub checked_at: String,
+}
+
 /// Admin overview: embeddings + categorization panels (Settings → Status).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SystemStatus {
     pub embeddings: EmbeddingsPanel,
     pub categorization: CategorizationPanel,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub integrity: Option<IntegrityReport>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -14,6 +14,9 @@ pub const API_VERSION: &str = "2022-11-28";
 const DEFAULT_USER_AGENT: &str = "Starboard/0.1 (+https://github.com/brocode/starboard)";
 const RATE_LIMIT_FLOOR: u32 = 50;
 const MAX_RETRIES: u32 = 3;
+/// Never sleep longer than this waiting for a primary rate-limit reset.
+/// Longer waits become a recoverable `rate_limited` error instead.
+pub const MAX_RATE_LIMIT_WAIT: Duration = Duration::from_secs(45);
 
 #[derive(Debug, Clone)]
 pub struct GitHubClient {
@@ -30,10 +33,32 @@ pub struct StarredPage {
     pub not_modified: bool,
 }
 
+/// README fetch outcome. `NotFound` is confirmed (do not retry);
+/// transport / 5xx errors stay `Err` so the queue can resume them.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ReadmeFetch {
+    Excerpt(String),
+    NotFound,
+}
+
 impl GitHubClient {
+    pub const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
+    pub const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
+
     pub fn new(pat: impl Into<String>, base_url: impl Into<String>) -> AppResult<Self> {
+        Self::with_timeouts(pat, base_url, Self::CONNECT_TIMEOUT, Self::REQUEST_TIMEOUT)
+    }
+
+    pub fn with_timeouts(
+        pat: impl Into<String>,
+        base_url: impl Into<String>,
+        connect: Duration,
+        request: Duration,
+    ) -> AppResult<Self> {
         let client = Client::builder()
             .user_agent(DEFAULT_USER_AGENT)
+            .connect_timeout(connect)
+            .timeout(request)
             .build()?;
         Ok(Self {
             client,
@@ -95,7 +120,7 @@ impl GitHubClient {
         })
     }
 
-    pub async fn fetch_readme(&self, owner: &str, repo: &str) -> AppResult<Option<String>> {
+    pub async fn fetch_readme(&self, owner: &str, repo: &str) -> AppResult<ReadmeFetch> {
         let url = format!("{}/repos/{owner}/{repo}/readme", self.base_url);
         let mut headers = self.auth_headers()?;
         headers.insert(
@@ -105,7 +130,7 @@ impl GitHubClient {
 
         let response = self.send_with_backoff(&url, headers).await?;
         if response.status() == StatusCode::NOT_FOUND {
-            return Ok(Some(String::new()));
+            return Ok(ReadmeFetch::NotFound);
         }
         if !response.status().is_success() {
             return Err(github_http_error(response).await);
@@ -119,17 +144,17 @@ impl GitHubClient {
             .to_ascii_lowercase();
 
         // GitHub may return encoding "none" / empty content for missing or exotic READMEs.
-        // Treat those as "no excerpt" rather than failing the whole queue.
+        // Treat those as confirmed empty rather than a transient failure.
         if content.trim().is_empty() || encoding == "none" {
-            return Ok(Some(String::new()));
+            return Ok(ReadmeFetch::Excerpt(String::new()));
         }
         if encoding != "base64" {
-            return Ok(Some(String::new()));
+            return Ok(ReadmeFetch::Excerpt(String::new()));
         }
 
         match decode_base64_readme(&content) {
-            Ok(decoded) => Ok(Some(strip_readme_noise(&decoded))),
-            Err(_) => Ok(Some(String::new())),
+            Ok(decoded) => Ok(ReadmeFetch::Excerpt(strip_readme_noise(&decoded))),
+            Err(_) => Ok(ReadmeFetch::Excerpt(String::new())),
         }
     }
 
@@ -141,7 +166,10 @@ impl GitHubClient {
             HeaderValue::from_str(&auth)
                 .map_err(|_| AppError::auth("invalid PAT for Authorization header"))?,
         );
-        headers.insert("X-GitHub-Api-Version", HeaderValue::from_static(API_VERSION));
+        headers.insert(
+            "X-GitHub-Api-Version",
+            HeaderValue::from_static(API_VERSION),
+        );
         headers.insert(USER_AGENT, HeaderValue::from_static(DEFAULT_USER_AGENT));
         Ok(headers)
     }
@@ -149,18 +177,15 @@ impl GitHubClient {
     async fn send_with_backoff(&self, url: &str, headers: HeaderMap) -> AppResult<Response> {
         let mut attempt = 0;
         loop {
-            let response = self
-                .client
-                .get(url)
-                .headers(headers.clone())
-                .send()
-                .await?;
+            let response = self.client.get(url).headers(headers.clone()).send().await?;
 
-            maybe_wait_for_rate_limit(response.headers()).await;
+            maybe_wait_for_rate_limit(response.headers()).await?;
 
             let status = response.status();
-            if matches!(status, StatusCode::FORBIDDEN | StatusCode::TOO_MANY_REQUESTS)
-                && attempt < MAX_RETRIES
+            if matches!(
+                status,
+                StatusCode::FORBIDDEN | StatusCode::TOO_MANY_REQUESTS
+            ) && attempt < MAX_RETRIES
             {
                 let delay = retry_delay(response.headers(), attempt);
                 tokio::time::sleep(delay).await;
@@ -204,10 +229,38 @@ fn retry_delay(headers: &HeaderMap, attempt: u32) -> Duration {
         .get("retry-after")
         .and_then(|v| v.to_str().ok())
         .and_then(|s| s.parse::<u64>().ok());
-    Duration::from_millis(compute_backoff_ms(attempt, retry_after))
+    let raw = Duration::from_millis(compute_backoff_ms(attempt, retry_after));
+    raw.min(MAX_RATE_LIMIT_WAIT)
 }
 
-async fn maybe_wait_for_rate_limit(headers: &HeaderMap) {
+/// Pure planner for primary rate-limit sleeps. Returns:
+/// - `Ok(None)` — no wait needed
+/// - `Ok(Some(d))` — wait `d` (already capped)
+/// - `Err(rate_limited)` — reset is further away than [`MAX_RATE_LIMIT_WAIT`]
+pub fn planned_rate_limit_wait(
+    remaining: u32,
+    reset_epoch_secs: u64,
+    now_epoch_secs: u64,
+    max_wait: Duration,
+) -> AppResult<Option<Duration>> {
+    if remaining >= RATE_LIMIT_FLOOR {
+        return Ok(None);
+    }
+    if reset_epoch_secs <= now_epoch_secs {
+        return Ok(None);
+    }
+    let wait = Duration::from_secs(reset_epoch_secs - now_epoch_secs);
+    if wait > max_wait {
+        return Err(AppError::rate_limited(format!(
+            "GitHub rate limit resets in {}s (cap {}s). Retry after the reset.",
+            wait.as_secs(),
+            max_wait.as_secs()
+        )));
+    }
+    Ok(Some(wait))
+}
+
+async fn maybe_wait_for_rate_limit(headers: &HeaderMap) -> AppResult<()> {
     let remaining = headers
         .get("x-ratelimit-remaining")
         .and_then(|v| v.to_str().ok())
@@ -218,21 +271,19 @@ async fn maybe_wait_for_rate_limit(headers: &HeaderMap) {
         .and_then(|s| s.parse::<u64>().ok());
 
     if let (Some(remaining), Some(reset)) = (remaining, reset) {
-        if remaining < RATE_LIMIT_FLOOR {
-            let now = SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .map(|d| d.as_secs())
-                .unwrap_or(0);
-            if reset > now {
-                let jitter = {
-                    let mut rng = rand::thread_rng();
-                    rng.gen_range(0..1_000)
-                };
-                let wait = Duration::from_secs(reset - now) + Duration::from_millis(jitter);
-                tokio::time::sleep(wait).await;
-            }
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        if let Some(wait) = planned_rate_limit_wait(remaining, reset, now, MAX_RATE_LIMIT_WAIT)? {
+            let jitter = {
+                let mut rng = rand::thread_rng();
+                rng.gen_range(0..1_000)
+            };
+            tokio::time::sleep(wait + Duration::from_millis(jitter)).await;
         }
     }
+    Ok(())
 }
 
 async fn github_http_error(response: Response) -> AppError {
@@ -450,12 +501,86 @@ On first launch, y"#;
             .await;
 
         let client = GitHubClient::new("test-token", server.uri()).expect("client");
-        let excerpt = client
-            .fetch_readme("owner", "repo")
+        let excerpt = client.fetch_readme("owner", "repo").await.expect("fetch");
+        assert_eq!(excerpt, ReadmeFetch::Excerpt(String::new()));
+    }
+
+    #[tokio::test]
+    async fn readme_404_is_not_found_not_retryable() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/repos/owner/gone/readme"))
+            .respond_with(ResponseTemplate::new(404).set_body_json(serde_json::json!({
+                "message": "Not Found"
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let client = GitHubClient::new("test-token", server.uri()).expect("client");
+        let result = client.fetch_readme("owner", "gone").await.expect("fetch");
+        assert_eq!(result, ReadmeFetch::NotFound);
+    }
+
+    #[tokio::test]
+    async fn readme_5xx_is_transient_error() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/repos/owner/flaky/readme"))
+            .respond_with(ResponseTemplate::new(503).set_body_json(serde_json::json!({
+                "message": "unavailable"
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let client = GitHubClient::new("test-token", server.uri()).expect("client");
+        let err = client
+            .fetch_readme("owner", "flaky")
             .await
-            .expect("fetch")
-            .expect("some");
-        assert_eq!(excerpt, "");
+            .expect_err("transient");
+        assert_eq!(err.code, "network_error");
+        assert!(err.message.contains("503"));
+    }
+
+    #[tokio::test]
+    async fn request_timeout_is_enforced() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/user/starred"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_delay(Duration::from_secs(2))
+                    .set_body_json(serde_json::json!([])),
+            )
+            .mount(&server)
+            .await;
+
+        let client = GitHubClient::with_timeouts(
+            "test-token",
+            server.uri(),
+            Duration::from_secs(1),
+            Duration::from_millis(200),
+        )
+        .expect("client");
+        let err = client
+            .fetch_starred_page(None, None)
+            .await
+            .expect_err("timeout");
+        assert_eq!(err.code, "network_error");
+    }
+
+    #[test]
+    fn rate_limit_wait_is_bounded() {
+        let far = planned_rate_limit_wait(1, 2_000_000_000, 1_000_000_000, MAX_RATE_LIMIT_WAIT)
+            .expect_err("cap");
+        assert_eq!(far.code, "rate_limited");
+        let none = planned_rate_limit_wait(80, 2_000_000_000, 1_000_000_000, MAX_RATE_LIMIT_WAIT)
+            .expect("none");
+        assert!(none.is_none());
+        let short = planned_rate_limit_wait(1, 1_000_000_010, 1_000_000_000, MAX_RATE_LIMIT_WAIT)
+            .expect("short");
+        assert_eq!(short, Some(Duration::from_secs(10)));
     }
 
     #[tokio::test]

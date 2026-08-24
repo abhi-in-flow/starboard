@@ -2,8 +2,8 @@ use tauri::State;
 
 use crate::error::AppResult;
 use crate::models::{AppSettings, UpdateSettingsRequest};
-use crate::services::{settings, store};
 use crate::services::store::DbState;
+use crate::services::{settings, store};
 
 #[tauri::command]
 pub fn get_settings(state: State<'_, DbState>) -> AppResult<AppSettings> {

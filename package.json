@@ -10,7 +10,7 @@
     "tauri": "tauri",
     "lint": "biome check .",
     "format": "biome format --write .",
-    "check": "biome check . && bunx tsc --noEmit && cargo clippy --manifest-path src-tauri/Cargo.toml -- -D warnings && cargo test --manifest-path src-tauri/Cargo.toml"
+    "check": "biome check . && bunx tsc --noEmit && cargo fmt --manifest-path src-tauri/Cargo.toml -- --check && cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings && cargo test --manifest-path src-tauri/Cargo.toml"
   },
   "dependencies": {
     "@tanstack/react-query": "^5",

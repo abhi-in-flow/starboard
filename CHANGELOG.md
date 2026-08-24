@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.8.0 — Production hardening
+
+- SQLite WAL/FK/busy_timeout/`synchronous=NORMAL`, transactional sync/taxonomy/embed/auth writes, ETag persisted only after apply commits, orphaned `sync_log` reconciliation, and migration 003 indexes plus README/document-hash columns.
+- Request timeouts, bounded GitHub rate-limit waits, and cancellable sync/README/embed/categorize jobs with UI Cancel.
+- Incremental sync never claims unstar detection; periodic full reconcile; README one-sweep with 404 vs transient retry; cheap embed-status via persisted hashes; paginated browse/search.
+- Scrubbed `log` sink at startup, Ollama/Markdown URL sanitization, non-null Tauri CSP, export-dialog path hygiene, Settings DB integrity check, and GitHub Actions CI with Tauri Linux deps (signing/updater remain external).
+
 ## 0.7.0
 
 - Semantic/Hybrid search shows a Sorted by relevance indicator and disables the library sort control while a query is active.

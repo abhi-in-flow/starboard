@@ -60,6 +60,11 @@ pub fn start_assignment(app: AppHandle, state: State<'_, CategorizeState>) -> Ap
 }
 
 #[tauri::command]
+pub fn cancel_assignment(state: State<'_, CategorizeState>) -> AppResult<()> {
+    categorizer::request_cancel(&state)
+}
+
+#[tauri::command]
 pub fn get_categorize_status(state: State<'_, CategorizeState>) -> AppResult<CategorizeStatus> {
     let running = state.running.load(std::sync::atomic::Ordering::SeqCst);
     let last_error = state
@@ -67,7 +72,10 @@ pub fn get_categorize_status(state: State<'_, CategorizeState>) -> AppResult<Cat
         .lock()
         .map_err(|_| AppError::db("categorize state lock poisoned"))?
         .clone();
-    Ok(CategorizeStatus { running, last_error })
+    Ok(CategorizeStatus {
+        running,
+        last_error,
+    })
 }
 
 #[tauri::command]

@@ -45,6 +45,18 @@ impl AppError {
     pub fn ollama(message: impl Into<String>) -> Self {
         Self::new("ollama_error", message)
     }
+
+    pub fn cancelled(message: impl Into<String>) -> Self {
+        Self::new("cancelled", message)
+    }
+
+    pub fn rate_limited(message: impl Into<String>) -> Self {
+        Self::new("rate_limited", message)
+    }
+
+    pub fn is_cancelled(&self) -> bool {
+        self.code == "cancelled"
+    }
 }
 
 impl From<rusqlite::Error> for AppError {

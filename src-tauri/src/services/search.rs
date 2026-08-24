@@ -5,16 +5,14 @@ use rusqlite::{params, params_from_iter, Connection};
 use tauri::{AppHandle, Manager};
 
 use crate::error::{AppError, AppResult};
-use crate::models::{
-    RepoListResult, RepoSummary, SearchMode, SearchReposRequest,
-};
+use crate::models::{RepoListResult, RepoSummary, SearchMode, SearchReposRequest};
 use crate::services::ollama::OllamaClient;
 use crate::services::repos::{self, build_filter_clause, order_by_clause};
 use crate::services::settings;
 use crate::services::store::DbState;
 
-const DEFAULT_LIMIT: i64 = 5000;
-const MAX_LIMIT: i64 = 10_000;
+const DEFAULT_LIMIT: i64 = crate::services::repos::DEFAULT_PAGE_SIZE;
+const MAX_LIMIT: i64 = 500;
 const RRF_K: i64 = 60;
 const TOP_K: i64 = 50;
 
@@ -134,7 +132,10 @@ pub async fn search_repos_async(
         Err(e) => {
             let mut result = with_db(app, |conn| search_repos(conn, req))?;
             result.mode_used = Some(SearchMode::Keyword);
-            result.hint = Some(format!("Ollama unavailable ({}) — using Keyword search", e.message));
+            result.hint = Some(format!(
+                "Ollama unavailable ({}) — using Keyword search",
+                e.message
+            ));
             return Ok(result);
         }
     };
@@ -337,10 +338,10 @@ fn search_semantic(
     let result = materialize_ranked(conn, req, &ranked, SearchMode::Semantic)?;
     let mut out = result;
     out.search_ms = Some(started.elapsed().as_millis() as u64);
-    eprintln!(
+    crate::services::logging::debug_timing(format!(
         "[search] semantic db+rank {}ms (excl. query embed)",
         out.search_ms.unwrap_or(0)
-    );
+    ));
     Ok(out)
 }
 
@@ -356,10 +357,10 @@ fn search_hybrid(
     let result = materialize_ranked(conn, req, &merged, SearchMode::Hybrid)?;
     let mut out = result;
     out.search_ms = Some(started.elapsed().as_millis() as u64);
-    eprintln!(
+    crate::services::logging::debug_timing(format!(
         "[search] hybrid db+rrf {}ms (excl. query embed)",
         out.search_ms.unwrap_or(0)
-    );
+    ));
     Ok(out)
 }
 
@@ -385,11 +386,7 @@ fn materialize_ranked(
     }
 
     let ids: Vec<i64> = ranked.iter().map(|(id, _)| *id).collect();
-    let placeholders = ids
-        .iter()
-        .map(|_| "?")
-        .collect::<Vec<_>>()
-        .join(",");
+    let placeholders = ids.iter().map(|_| "?").collect::<Vec<_>>().join(",");
     let (filter_sql, filter_bind) = build_filter_clause(&filters, None)?;
     let where_extra = if filter_sql.is_empty() {
         String::new()
@@ -528,8 +525,8 @@ mod tests {
         // id 1 and 3 appear in both → higher scores than 2 and 4.
         assert_eq!(merged[0].0, 1); // ranks 1 and 3 → 1/61 + 1/63
         assert_eq!(merged[1].0, 3); // ranks 3 and 1 → 1/63 + 1/61 — wait equal to 1?
-        // Actually 1: rank1 in A (1/61) + rank3 in B (1/63)
-        //         3: rank3 in A (1/63) + rank1 in B (1/61) — equal scores; tie-break by id.
+                                    // Actually 1: rank1 in A (1/61) + rank3 in B (1/63)
+                                    //         3: rank3 in A (1/63) + rank1 in B (1/61) — equal scores; tie-break by id.
         assert!(merged[0].0 == 1 || merged[0].0 == 3);
         assert!(merged.iter().any(|(id, _)| *id == 2));
         assert!(merged.iter().any(|(id, _)| *id == 4));
@@ -565,7 +562,10 @@ mod tests {
         assert_eq!(normalize_relevance(&[(42, 0.01)]), vec![(42, 100)]);
         assert!(normalize_relevance(&[]).is_empty());
         // Zero max score is safe.
-        assert_eq!(normalize_relevance(&[(1, 0.0), (2, 0.0)]), vec![(1, 0), (2, 0)]);
+        assert_eq!(
+            normalize_relevance(&[(1, 0.0), (2, 0.0)]),
+            vec![(1, 0), (2, 0)]
+        );
     }
 
     #[test]
@@ -928,5 +928,62 @@ mod tests {
             keyword_misses >= 2,
             "expected keyword to miss the semantic top hit on at least 2/3 conceptual queries"
         );
+    }
+
+    #[test]
+    fn keyword_pagination_preserves_total_and_rank_order() {
+        let conn = test_conn();
+        apply_full_diff(
+            &conn,
+            &[
+                sample(1, "tokio"),
+                sample(2, "tokio-util"),
+                sample(3, "tokio-stream"),
+                sample(4, "serde"),
+            ],
+        )
+        .expect("seed");
+
+        let page1 = search_repos(
+            &conn,
+            SearchReposRequest {
+                query: "tokio".into(),
+                filters: Some(RepoFilters::default()),
+                sort: Some(RepoSort::Name),
+                sort_desc: Some(false),
+                limit: Some(2),
+                offset: Some(0),
+                mode: Some(SearchMode::Keyword),
+            },
+        )
+        .expect("p1");
+        assert_eq!(page1.total, 3);
+        assert_eq!(page1.items.len(), 2);
+
+        let page2 = search_repos(
+            &conn,
+            SearchReposRequest {
+                query: "tokio".into(),
+                filters: Some(RepoFilters::default()),
+                sort: Some(RepoSort::Name),
+                sort_desc: Some(false),
+                limit: Some(2),
+                offset: Some(2),
+                mode: Some(SearchMode::Keyword),
+            },
+        )
+        .expect("p2");
+        assert_eq!(page2.total, 3);
+        assert_eq!(page2.items.len(), 1);
+        let ids: Vec<i64> = page1
+            .items
+            .iter()
+            .chain(page2.items.iter())
+            .map(|r| r.id)
+            .collect();
+        let mut unique = ids.clone();
+        unique.sort_unstable();
+        unique.dedup();
+        assert_eq!(unique.len(), 3);
     }
 }

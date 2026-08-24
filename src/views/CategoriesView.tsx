@@ -13,7 +13,9 @@ import {
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { isCancelledMessage } from "@/lib/jobStatus";
 import {
+  cancelAssignment,
   commitTaxonomy,
   generateTaxonomy,
   getCategorizeStatus,
@@ -139,6 +141,7 @@ export function CategoriesView() {
   const [editorMode, setEditorMode] = useState<EditorMode>("create");
   const [progress, setProgress] = useState<CategorizeProgress | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [actionNotice, setActionNotice] = useState<string | null>(null);
 
   const ollama = useQuery({
     queryKey: ["ollamaStatus"],
@@ -227,12 +230,31 @@ export function CategoriesView() {
     mutationFn: startAssignment,
     onSuccess: () => {
       setActionError(null);
+      setActionNotice(null);
       setProgress({
         kind: "starting",
         current: 0,
         total: 0,
         message: "Starting assignment…",
       });
+      void queryClient.invalidateQueries({ queryKey: ["categorizeStatus"] });
+    },
+    onError: (err) => {
+      const message = errorMessage(err);
+      if (isCancelledMessage(message)) {
+        setActionNotice(message);
+        setActionError(null);
+      } else {
+        setActionError(message);
+      }
+    },
+  });
+
+  const cancelAssignMutation = useMutation({
+    mutationFn: cancelAssignment,
+    onSuccess: () => {
+      setActionNotice("Cancelled");
+      setActionError(null);
       void queryClient.invalidateQueries({ queryKey: ["categorizeStatus"] });
     },
     onError: (err) => setActionError(errorMessage(err)),
@@ -376,6 +398,11 @@ export function CategoriesView() {
         </p>
       ) : null}
 
+      {actionNotice ? (
+        <p className="rounded-md border border-border bg-muted/40 px-3 py-2 text-sm text-muted-foreground">
+          {actionNotice}
+        </p>
+      ) : null}
       {actionError ? (
         <p className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
           {actionError}
@@ -562,6 +589,17 @@ export function CategoriesView() {
             {running ? <Loader2 className="size-4 animate-spin" /> : null}
             {running ? "Assigning…" : "Start assignment"}
           </Button>
+          {running ? (
+            <Button
+              type="button"
+              variant="outline"
+              className="w-fit"
+              disabled={cancelAssignMutation.isPending}
+              onClick={() => cancelAssignMutation.mutate()}
+            >
+              Cancel
+            </Button>
+          ) : null}
           {progress ? (
             <div className="rounded-md border border-border bg-muted/30 px-3 py-2 text-sm">
               <p>
@@ -571,11 +609,23 @@ export function CategoriesView() {
                   : ""}
               </p>
               {progress.error ? (
-                <p className="mt-1 text-destructive">{progress.error}</p>
+                <p
+                  className={
+                    isCancelledMessage(progress.error)
+                      ? "mt-1 text-muted-foreground"
+                      : "mt-1 text-destructive"
+                  }
+                >
+                  {progress.error}
+                </p>
               ) : null}
             </div>
           ) : null}
-          {categorizeStatus.data?.lastError ? (
+          {actionNotice ? (
+            <p className="text-sm text-muted-foreground">{actionNotice}</p>
+          ) : null}
+          {categorizeStatus.data?.lastError &&
+          !isCancelledMessage(categorizeStatus.data.lastError) ? (
             <p className="text-sm text-destructive">
               Last error: {categorizeStatus.data.lastError}
             </p>
