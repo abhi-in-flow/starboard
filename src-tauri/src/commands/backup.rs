@@ -3,7 +3,7 @@ use std::sync::atomic::Ordering;
 use tauri::{AppHandle, State};
 
 use crate::error::AppResult;
-use crate::models::{BackupResult, BackupValidation, IntegrityCheckResult, RestoreResult};
+use crate::models::{BackupResult, BackupValidation, RestoreResult};
 use crate::services::backup::{self, JobGuard};
 use crate::services::categorizer::CategorizeState;
 use crate::services::embed::EmbedState;
@@ -47,9 +47,4 @@ pub fn restore_backup(
     let live = store::db_path(&app)?;
     let src = backup::validate_backup_source_path(path.trim(), Some(live.as_path()))?;
     store::with_conn_mut(&db, |conn| backup::restore_backup(conn, &src, &live, &jobs))
-}
-
-#[tauri::command]
-pub fn check_db_integrity(state: State<'_, DbState>) -> AppResult<IntegrityCheckResult> {
-    store::with_conn(&state, backup::integrity_check)
 }

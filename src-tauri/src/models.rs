@@ -582,13 +582,6 @@ pub struct DataPanel {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct IntegrityCheckResult {
-    pub ok: bool,
-    pub message: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
 pub struct BackupValidation {
     pub ok: bool,
     pub path: String,

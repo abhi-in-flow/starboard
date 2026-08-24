@@ -347,11 +347,6 @@ export type DataPanel = {
   lastRestoreAt: string | null;
 };
 
-export type IntegrityCheckResult = {
-  ok: boolean;
-  message: string;
-};
-
 export type BackupValidation = {
   ok: boolean;
   path: string;

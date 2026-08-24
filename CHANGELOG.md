@@ -2,7 +2,7 @@
 
 ## 0.12.0 — Backup and restore
 
-- Settings → Status Data section: create a consistent SQLite backup, validate a file, check integrity, and restore with explicit confirmation.
+- Settings → Status Data section: create a consistent SQLite backup, validate a file, and restore with explicit confirmation. Database integrity stays on the existing Status integrity card.
 - Restore validates schema/integrity, refuses while sync/embed/categorize/README is running, writes a pre-restore safety copy, and rolls the live DB back if anything fails.
 - GitHub PAT stays in the OS keyring and is never part of backup or restore.
 

@@ -10,18 +10,12 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { formatRelative } from "@/lib/format";
-import {
-  checkDbIntegrity,
-  createBackup,
-  restoreBackup,
-  validateBackup,
-} from "@/lib/tauri";
+import { createBackup, restoreBackup, validateBackup } from "@/lib/tauri";
 import type {
   AppError,
   BackupResult,
   BackupValidation,
   DataPanel,
-  IntegrityCheckResult,
   RestoreResult,
 } from "@/types";
 
@@ -56,7 +50,6 @@ export function DataBackupCard({ data }: Props) {
   const queryClient = useQueryClient();
   const [backupResult, setBackupResult] = useState<BackupResult | null>(null);
   const [validation, setValidation] = useState<BackupValidation | null>(null);
-  const [integrity, setIntegrity] = useState<IntegrityCheckResult | null>(null);
   const [restorePreview, setRestorePreview] = useState<string | null>(null);
   const [restoreResult, setRestoreResult] = useState<RestoreResult | null>(
     null,
@@ -83,17 +76,6 @@ export function DataBackupCard({ data }: Props) {
     },
     onError: (err) => {
       setValidation(null);
-      setActionError(errorMessage(err));
-    },
-  });
-
-  const integrityMutation = useMutation({
-    mutationFn: checkDbIntegrity,
-    onSuccess: (result) => {
-      setIntegrity(result);
-      setActionError(null);
-    },
-    onError: (err) => {
       setActionError(errorMessage(err));
     },
   });
@@ -216,14 +198,6 @@ export function DataBackupCard({ data }: Props) {
           </Button>
           <Button
             type="button"
-            variant="outline"
-            disabled={integrityMutation.isPending}
-            onClick={() => integrityMutation.mutate()}
-          >
-            {integrityMutation.isPending ? "Checking…" : "Check integrity"}
-          </Button>
-          <Button
-            type="button"
             variant="destructive"
             disabled={restoreMutation.isPending}
             onClick={() => void handleChooseRestore()}
@@ -239,11 +213,6 @@ export function DataBackupCard({ data }: Props) {
           </p>
         ) : null}
         {validation ? <p className="text-sm">{validation.message}</p> : null}
-        {integrity ? (
-          <p className={integrity.ok ? "text-sm" : "text-sm text-destructive"}>
-            Integrity: {integrity.message}
-          </p>
-        ) : null}
         {restoreResult ? (
           <p className="text-sm">
             Restored {restoreResult.repoCount} repos

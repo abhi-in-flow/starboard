@@ -5,9 +5,8 @@ use rusqlite::{backup::Backup, Connection, OpenFlags};
 use time::OffsetDateTime;
 
 use crate::error::{AppError, AppResult};
-use crate::models::{
-    BackupResult, BackupValidation, DataPanel, IntegrityCheckResult, RestoreResult,
-};
+use crate::models::{BackupResult, BackupValidation, DataPanel, RestoreResult};
+use crate::services::integrity;
 use crate::services::settings;
 use crate::services::store::{self, CURRENT_SCHEMA_VERSION, MIN_SUPPORTED_SCHEMA_VERSION};
 
@@ -199,20 +198,18 @@ fn open_readonly(path: &Path) -> AppResult<Connection> {
     })
 }
 
-pub fn integrity_check(conn: &Connection) -> AppResult<IntegrityCheckResult> {
-    let mut stmt = conn.prepare("PRAGMA integrity_check")?;
-    let rows: Vec<String> = stmt
-        .query_map([], |row| row.get(0))?
-        .collect::<Result<Vec<_>, _>>()?;
-    if rows.is_empty() {
-        return Ok(IntegrityCheckResult {
-            ok: false,
-            message: "integrity_check returned no rows".into(),
-        });
+fn require_integrity(conn: &Connection, code: &'static str, context: &str) -> AppResult<()> {
+    let report = integrity::check_integrity(conn)?;
+    if !report.ok {
+        return Err(backup_err(
+            code,
+            format!(
+                "{context}: {} (foreign key violations: {})",
+                report.integrity, report.foreign_key_violations
+            ),
+        ));
     }
-    let message = rows.join("; ");
-    let ok = rows.len() == 1 && rows[0].eq_ignore_ascii_case("ok");
-    Ok(IntegrityCheckResult { ok, message })
+    Ok(())
 }
 
 fn pragma_user_version(conn: &Connection) -> AppResult<i64> {
@@ -252,16 +249,11 @@ fn count_table(conn: &Connection, table: &str) -> AppResult<i64> {
 }
 
 fn inspect_starboard(conn: &Connection) -> AppResult<(i64, i64, i64)> {
-    let integrity = integrity_check(conn)?;
-    if !integrity.ok {
-        return Err(backup_err(
-            "backup_corrupt",
-            format!(
-                "backup failed PRAGMA integrity_check: {}",
-                integrity.message
-            ),
-        ));
-    }
+    require_integrity(
+        conn,
+        "backup_corrupt",
+        "backup failed PRAGMA integrity_check",
+    )?;
 
     let missing = missing_required_tables(conn)?;
     if !missing.is_empty() {
@@ -416,17 +408,14 @@ fn rollback_live(live: &mut Connection, snapshot: &Path) -> AppResult<()> {
     })?;
     copy_database(&src, live)?;
     store::migrate_conn(live)?;
-    let integrity = integrity_check(live)?;
-    if !integrity.ok {
-        return Err(backup_err(
-            "backup_error",
-            format!(
-                "restore failed and the safety copy at {} also failed integrity_check: {}",
-                snapshot.display(),
-                integrity.message
-            ),
-        ));
-    }
+    require_integrity(
+        live,
+        "backup_error",
+        &format!(
+            "restore failed and the safety copy at {} also failed integrity_check",
+            snapshot.display()
+        ),
+    )?;
     Ok(())
 }
 
@@ -473,16 +462,11 @@ pub fn restore_backup(
 
         let before = prepare_restored_version(live)?;
         store::migrate_conn(live)?;
-        let integrity = integrity_check(live)?;
-        if !integrity.ok {
-            return Err(backup_err(
-                "backup_corrupt",
-                format!(
-                    "restored database failed PRAGMA integrity_check: {}",
-                    integrity.message
-                ),
-            ));
-        }
+        require_integrity(
+            live,
+            "backup_corrupt",
+            "restored database failed PRAGMA integrity_check",
+        )?;
         let after = pragma_user_version(live)?;
         Ok((after, after > before, count_table(live, "repos")?))
     })();
@@ -921,6 +905,22 @@ mod tests {
             .expect("vec after");
         assert_eq!(has_meta, 1);
         assert_eq!(has_vec, 1);
+        let has_hash: i64 = live
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('repos') WHERE name = 'document_hash'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("003");
+        assert_eq!(has_hash, 1, "v1 restore must apply hardening 003");
+        let has_review: i64 = live
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE name = 'repo_review'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("004");
+        assert_eq!(has_review, 1, "v1 restore must apply review 004");
 
         let _ = std::fs::remove_file(&v1_path);
         let _ = std::fs::remove_file(&live_path);
@@ -928,12 +928,52 @@ mod tests {
     }
 
     #[test]
+    fn restore_roundtrip_preserves_v4_review_state() {
+        let live_path = unique("v4-live");
+        let dest = unique("v4-backup");
+        let restore_live = unique("v4-restore");
+        let conn = open_and_migrate(&live_path).expect("v4");
+        seed_library(&conn);
+        conn.execute(
+            "INSERT INTO repo_review (repo_id, reviewed_at, snoozed_until)
+             VALUES (11, '2026-08-01T00:00:00Z', NULL)",
+            [],
+        )
+        .expect("review");
+
+        let created = create_backup(&conn, &dest, Some(live_path.as_path())).expect("backup");
+        assert_eq!(created.schema_version, 4);
+        let valid = validate_backup_file(&dest).expect("valid v4");
+        assert_eq!(valid.schema_version, 4);
+
+        let mut other = open_and_migrate(&restore_live).expect("other live");
+        let result = restore_backup(&mut other, &dest, &restore_live, &JobGuard::default())
+            .expect("restore v4");
+        assert!(!result.migrated);
+        assert_eq!(result.schema_version, CURRENT_SCHEMA_VERSION);
+        assert_seeded(&other);
+        let reviewed: String = other
+            .query_row(
+                "SELECT reviewed_at FROM repo_review WHERE repo_id = 11",
+                [],
+                |row| row.get(0),
+            )
+            .expect("review row");
+        assert_eq!(reviewed, "2026-08-01T00:00:00Z");
+
+        let _ = std::fs::remove_file(&live_path);
+        let _ = std::fs::remove_file(&dest);
+        let _ = std::fs::remove_file(&restore_live);
+        let _ = std::fs::remove_file(&result.pre_restore_backup_path);
+    }
+
+    #[test]
     fn integrity_check_ok_on_fresh_db() {
         let path = unique("integrity");
         let conn = open_and_migrate(&path).expect("migrate");
-        let result = integrity_check(&conn).expect("check");
+        let result = crate::services::integrity::check_integrity(&conn).expect("check");
         assert!(result.ok);
-        assert_eq!(result.message.to_ascii_lowercase(), "ok");
+        assert_eq!(result.integrity.to_ascii_lowercase(), "ok");
         let _ = std::fs::remove_file(path);
     }
 
