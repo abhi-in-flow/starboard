@@ -24,3 +24,8 @@ pub fn start_embedding(app: AppHandle, state: State<'_, EmbedState>) -> AppResul
     });
     Ok(())
 }
+
+#[tauri::command]
+pub fn cancel_embedding(state: State<'_, EmbedState>) -> AppResult<()> {
+    embed::request_cancel(&state)
+}

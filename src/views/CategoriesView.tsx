@@ -14,6 +14,7 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
+  cancelAssignment,
   commitTaxonomy,
   generateTaxonomy,
   getCategorizeStatus,
@@ -562,6 +563,22 @@ export function CategoriesView() {
             {running ? <Loader2 className="size-4 animate-spin" /> : null}
             {running ? "Assigning…" : "Start assignment"}
           </Button>
+          {running ? (
+            <Button
+              type="button"
+              variant="outline"
+              className="w-fit"
+              onClick={() => {
+                void cancelAssignment().then(() =>
+                  queryClient.invalidateQueries({
+                    queryKey: ["categorizeStatus"],
+                  }),
+                );
+              }}
+            >
+              Cancel
+            </Button>
+          ) : null}
           {progress ? (
             <div className="rounded-md border border-border bg-muted/30 px-3 py-2 text-sm">
               <p>

@@ -24,7 +24,9 @@ pub fn resume_readme_queue(
     }
     let pending = store::with_conn(&db, |conn| {
         let count: i64 = conn.query_row(
-            "SELECT COUNT(*) FROM repos WHERE readme_excerpt IS NULL AND unstarred = 0",
+            "SELECT COUNT(*) FROM repos
+             WHERE unstarred = 0
+               AND (readme_excerpt IS NULL OR readme_status = 'retryable')",
             [],
             |row| row.get(0),
         )?;
@@ -46,5 +48,17 @@ pub fn get_sync_status(
     let readme_running = sync_state
         .readme_running
         .load(std::sync::atomic::Ordering::SeqCst);
-    store::with_conn(&db, |conn| sync::get_sync_status(conn, running, readme_running))
+    store::with_conn(&db, |conn| {
+        sync::get_sync_status(conn, running, readme_running)
+    })
+}
+
+#[tauri::command]
+pub fn cancel_sync(sync_state: State<'_, SyncState>) -> AppResult<()> {
+    sync::request_cancel_sync(&sync_state)
+}
+
+#[tauri::command]
+pub fn cancel_readme_queue(sync_state: State<'_, SyncState>) -> AppResult<()> {
+    sync::request_cancel_readme(&sync_state)
 }

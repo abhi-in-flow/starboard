@@ -3,6 +3,8 @@ import { listen } from "@tauri-apps/api/event";
 import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import {
+  cancelReadmeQueue,
+  cancelSync,
   getAuthStatus,
   getSyncStatus,
   resumeReadmeQueue,
@@ -185,6 +187,16 @@ export function SyncHeader() {
               {pct !== null ? ` (${pct}%)` : ""}
             </p>
           ) : null}
+          {syncQuery.data?.unstarPolicy ? (
+            <p
+              className="truncate text-xs text-muted-foreground"
+              title={syncQuery.data.unstarPolicy}
+            >
+              {syncQuery.data.reconcileDue
+                ? "Next Sync will run a full reconcile to detect unstars."
+                : "Incremental Sync does not detect unstars — use Full sync, or wait for the automatic 7-day reconcile."}
+            </p>
+          ) : null}
           {syncError ? (
             <p
               className="text-xs text-destructive"
@@ -196,6 +208,26 @@ export function SyncHeader() {
           ) : null}
         </div>
         <div className="flex shrink-0 gap-2">
+          {listSyncing || readmeRunning ? (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                if (listSyncing) {
+                  void cancelSync().then(() =>
+                    queryClient.invalidateQueries({ queryKey: ["syncStatus"] }),
+                  );
+                } else {
+                  void cancelReadmeQueue().then(() =>
+                    queryClient.invalidateQueries({ queryKey: ["syncStatus"] }),
+                  );
+                }
+              }}
+            >
+              Cancel
+            </Button>
+          ) : null}
           {showResume ? (
             <Button
               type="button"

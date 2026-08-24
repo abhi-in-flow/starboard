@@ -15,6 +15,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import {
+  cancelEmbedding,
   getEmbedStatus,
   getLibraryFacets,
   getOllamaStatus,
@@ -250,6 +251,21 @@ export function LibraryToolbar({ searchRef, total, searchHint }: Props) {
               {embedStatus.data?.running
                 ? `Embedding… ${embedStatus.data.embeddedRepos}/${embedStatus.data.totalRepos}`
                 : "Build embeddings"}
+            </Button>
+          ) : null}
+          {embedStatus.data?.running ? (
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              className="h-7 px-2 text-xs"
+              onClick={() => {
+                void cancelEmbedding().then(() =>
+                  queryClient.invalidateQueries({ queryKey: ["embedStatus"] }),
+                );
+              }}
+            >
+              Cancel
             </Button>
           ) : null}
           {embedStatus.data?.needRebuild ? (
