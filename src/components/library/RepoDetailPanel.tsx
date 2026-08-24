@@ -6,6 +6,13 @@ import { RepoAvatar } from "@/components/library/RepoAvatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
+  Dialog,
+  DialogClose,
+  DialogContent,
+  DialogDescription,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
   Select,
   SelectContent,
   SelectItem,
@@ -25,7 +32,6 @@ import {
   setRepoCategory,
   setRepoReview,
 } from "@/lib/tauri";
-import { cn } from "@/lib/utils";
 import { useUiStore } from "@/store/ui";
 
 const MarkdownExcerpt = lazy(
@@ -93,21 +99,26 @@ export function RepoDetailPanel({ repoId, variant = "docked" }: Props) {
   const isManual = repo?.categorySource === "manual";
   const overlay = variant === "overlay";
 
-  const PanelTag = overlay ? "div" : "aside";
-  const panel = (
-    <PanelTag
-      className={cn(
-        "flex min-h-0 flex-col border-border bg-background",
-        overlay
-          ? "h-full w-full max-w-lg border-l shadow-none"
-          : "h-full w-[min(380px,100%)] shrink-0 border-l",
-      )}
-      role={overlay ? "dialog" : "complementary"}
-      aria-modal={overlay ? true : undefined}
-      aria-label="Repository details"
-    >
-      <div className="flex items-center justify-between border-b border-border px-4 py-3">
+  const header = (
+    <div className="flex items-center justify-between border-b border-border px-4 py-3">
+      {overlay ? (
+        <DialogTitle>Details</DialogTitle>
+      ) : (
         <p className="text-sm font-medium">Details</p>
+      )}
+      {overlay ? (
+        <DialogClose asChild>
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="h-8 w-8 p-0"
+            aria-label="Close detail"
+          >
+            <X className="size-4" />
+          </Button>
+        </DialogClose>
+      ) : (
         <Button
           type="button"
           variant="ghost"
@@ -115,354 +126,365 @@ export function RepoDetailPanel({ repoId, variant = "docked" }: Props) {
           className="h-8 w-8 p-0"
           onClick={() => setSelectedRepoId(null)}
           aria-label="Close detail"
-          autoFocus={overlay}
         >
           <X className="size-4" />
         </Button>
-      </div>
+      )}
+    </div>
+  );
 
-      <div className="flex-1 overflow-auto px-4 py-4">
-        {detail.isLoading ? (
-          <p className="text-sm text-muted-foreground">Loading…</p>
-        ) : detail.isError ? (
-          <p className="text-sm text-destructive">Failed to load repository.</p>
-        ) : repo ? (
-          <div className="flex flex-col gap-4">
-            <div>
-              <div className="flex items-start gap-3">
-                <RepoAvatar fullName={repo.fullName} size={48} />
-                <div className="min-w-0">
-                  <h2 className="text-lg font-semibold tracking-tight">
-                    {repo.fullName}
-                  </h2>
-                  {repo.description ? (
-                    <p className="mt-1 text-sm text-muted-foreground">
-                      {repo.description}
-                    </p>
-                  ) : null}
-                </div>
-              </div>
-              <div className="mt-2 flex flex-wrap gap-2">
-                {repo.archived ? (
-                  <Badge variant="secondary">Archived</Badge>
-                ) : null}
-                {repo.fork ? <Badge variant="outline">Fork</Badge> : null}
-                {repo.unstarred ? (
-                  <Badge variant="destructive">Unstarred</Badge>
-                ) : null}
-                {repo.license ? (
-                  <Badge variant="outline">{repo.license}</Badge>
-                ) : null}
-              </div>
-            </div>
-
-            <div className="grid grid-cols-1 gap-3 text-sm sm:grid-cols-2">
-              <Stat label="Stars" value={formatCount(repo.starsCount)} />
-              <Stat label="Forks" value={formatCount(repo.forksCount)} />
-              <Stat label="Open issues" value={formatCount(repo.openIssues)} />
-              <Stat
-                label="Language"
-                value={
-                  repo.language ? (
-                    <button
-                      type="button"
-                      className="inline-flex items-center gap-1.5 hover:underline"
-                      onClick={() => setLanguage(repo.language)}
-                    >
-                      <span
-                        className="size-2.5 rounded-full"
-                        style={{
-                          backgroundColor: languageColor(repo.language),
-                        }}
-                      />
-                      {repo.language}
-                    </button>
-                  ) : (
-                    "—"
-                  )
-                }
-              />
-              <Stat label="Starred" value={formatRelative(repo.starredAt)} />
-              <Stat label="Pushed" value={formatRelative(repo.pushedAt)} />
-              <Stat
-                label="Created"
-                value={formatRelative(repo.repoCreatedAt)}
-              />
-              <Stat label="Fetched" value={formatRelative(repo.fetchedAt)} />
-            </div>
-
-            {repo.topics.length > 0 ? (
-              <div>
-                <p className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                  Topics
-                </p>
-                <div className="flex flex-wrap gap-1.5">
-                  {repo.topics.map((t) => (
-                    <button key={t} type="button" onClick={() => setTopic(t)}>
-                      <Badge
-                        variant="outline"
-                        className="cursor-pointer font-normal"
-                      >
-                        {t}
-                      </Badge>
-                    </button>
-                  ))}
-                </div>
-              </div>
-            ) : null}
-
-            <div>
-              <p className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                Category
-              </p>
-              <div className="flex flex-col gap-2">
-                <div className="flex flex-wrap items-center gap-2">
-                  {repo.categoryNames.length > 0 ? (
-                    repo.categoryNames.map((c) => (
-                      <Badge key={c} variant="secondary">
-                        {c}
-                      </Badge>
-                    ))
-                  ) : (
-                    <span className="text-sm text-muted-foreground">
-                      Uncategorized
-                    </span>
-                  )}
-                  {repo.categorySource ? (
-                    <Badge variant="outline">
-                      {repo.categorySource === "manual" ? "Manual" : "LLM"}
-                    </Badge>
-                  ) : null}
-                </div>
-                {flatCats.length > 0 ? (
-                  <Select
-                    value={
-                      repo.categoryId != null ? String(repo.categoryId) : ""
-                    }
-                    onValueChange={(v) => {
-                      const id = Number(v);
-                      if (Number.isFinite(id)) {
-                        setCategory.mutate(id);
-                      }
-                    }}
-                  >
-                    <SelectTrigger className="w-full">
-                      <SelectValue placeholder="Set category manually…" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {flatCats.map((c) => (
-                        <SelectItem key={c.id} value={String(c.id)}>
-                          {c.label}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                ) : (
-                  <p className="text-xs text-muted-foreground">
-                    Commit a taxonomy in Categories first.
-                  </p>
-                )}
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  className="w-fit gap-1"
-                  disabled={
-                    offline ||
-                    isManual ||
-                    flatCats.length === 0 ||
-                    recategorize.isPending
-                  }
-                  title={
-                    isManual
-                      ? "Manual override — clear via picker change only"
-                      : offline
-                        ? ollamaAvailabilityLabel(false)
-                        : undefined
-                  }
-                  onClick={() => recategorize.mutate()}
-                >
-                  {recategorize.isPending ? (
-                    <Loader2 className="size-3 animate-spin" />
-                  ) : null}
-                  Re-categorize with LLM
-                </Button>
-                {recategorize.isError ? (
-                  <p className="text-xs text-destructive">
-                    {(recategorize.error as { message?: string })?.message ??
-                      "Re-categorize failed"}
+  const body = (
+    <div className="flex-1 overflow-auto px-4 py-4">
+      {detail.isLoading ? (
+        <p className="text-sm text-muted-foreground">Loading…</p>
+      ) : detail.isError ? (
+        <p className="text-sm text-destructive">Failed to load repository.</p>
+      ) : repo ? (
+        <div className="flex flex-col gap-4">
+          <div>
+            <div className="flex items-start gap-3">
+              <RepoAvatar fullName={repo.fullName} size={48} />
+              <div className="min-w-0">
+                <h2 className="text-lg font-semibold tracking-tight">
+                  {repo.fullName}
+                </h2>
+                {repo.description ? (
+                  <p className="mt-1 text-sm text-muted-foreground">
+                    {repo.description}
                   </p>
                 ) : null}
               </div>
             </div>
-
-            <div>
-              <p className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                Review
-              </p>
-              <p className="mb-2 text-xs text-muted-foreground">
-                Local only — never stars or unstars on GitHub.
-              </p>
-              <div className="flex flex-wrap items-center gap-2">
-                {repo.reviewedAt ? (
-                  <Badge variant="secondary">
-                    Reviewed {formatRelative(repo.reviewedAt)}
-                  </Badge>
-                ) : null}
-                {repo.snoozedUntil ? (
-                  <Badge variant="outline">
-                    Snoozed until {repo.snoozedUntil.slice(0, 10)}
-                  </Badge>
-                ) : null}
-              </div>
-              <div className="mt-2 flex flex-wrap items-center gap-2">
-                {repo.reviewedAt ? (
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="outline"
-                    disabled={reviewMutation.isPending}
-                    onClick={() =>
-                      reviewMutation.mutate({
-                        repoId,
-                        reviewed: false,
-                        snoozeDays: null,
-                      })
-                    }
-                  >
-                    Undo reviewed
-                  </Button>
-                ) : (
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="outline"
-                    disabled={reviewMutation.isPending}
-                    onClick={() =>
-                      reviewMutation.mutate({
-                        repoId,
-                        reviewed: true,
-                        snoozeDays: null,
-                      })
-                    }
-                  >
-                    Mark reviewed
-                  </Button>
-                )}
-                {repo.snoozedUntil ? (
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="ghost"
-                    disabled={reviewMutation.isPending}
-                    onClick={() =>
-                      reviewMutation.mutate({
-                        repoId,
-                        reviewed: null,
-                        snoozeDays: 0,
-                      })
-                    }
-                  >
-                    Clear snooze
-                  </Button>
-                ) : (
-                  <Select
-                    onValueChange={(v) => {
-                      const days = Number(v);
-                      if (Number.isFinite(days)) {
-                        reviewMutation.mutate({
-                          repoId,
-                          reviewed: null,
-                          snoozeDays: days,
-                        });
-                      }
-                    }}
-                  >
-                    <SelectTrigger
-                      className="h-8 w-36"
-                      aria-label="Snooze review"
-                    >
-                      <SelectValue placeholder="Snooze…" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {SNOOZE_OPTIONS.map((opt) => (
-                        <SelectItem key={opt.days} value={String(opt.days)}>
-                          {opt.label}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                )}
-              </div>
-            </div>
-
-            <Separator />
-
-            <div>
-              <p className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                README excerpt
-              </p>
-              {repo.readmeExcerpt == null ? (
-                <p className="text-sm text-muted-foreground">
-                  Not fetched yet — still in the README queue.
-                </p>
-              ) : repo.readmeExcerpt === "" ? (
-                <p className="text-sm text-muted-foreground">
-                  No README available for this repository.
-                </p>
-              ) : (
-                <Suspense
-                  fallback={
-                    <p className="text-sm text-muted-foreground">
-                      Loading README…
-                    </p>
-                  }
-                >
-                  <MarkdownExcerpt markdown={repo.readmeExcerpt} />
-                </Suspense>
-              )}
-            </div>
-
-            <div className="flex flex-col gap-2">
-              <Button
-                type="button"
-                className="w-full gap-2"
-                onClick={() => void openUrl(repo.htmlUrl)}
-              >
-                <ExternalLink className="size-4" />
-                Open on GitHub
-              </Button>
-              {repo.homepage ? (
-                <Button
-                  type="button"
-                  variant="outline"
-                  className="w-full gap-2"
-                  onClick={() => void openUrl(repo.homepage as string)}
-                >
-                  Homepage
-                </Button>
+            <div className="mt-2 flex flex-wrap gap-2">
+              {repo.archived ? (
+                <Badge variant="secondary">Archived</Badge>
+              ) : null}
+              {repo.fork ? <Badge variant="outline">Fork</Badge> : null}
+              {repo.unstarred ? (
+                <Badge variant="destructive">Unstarred</Badge>
+              ) : null}
+              {repo.license ? (
+                <Badge variant="outline">{repo.license}</Badge>
               ) : null}
             </div>
           </div>
-        ) : null}
-      </div>
-    </PanelTag>
+
+          <div className="grid grid-cols-1 gap-3 text-sm sm:grid-cols-2">
+            <Stat label="Stars" value={formatCount(repo.starsCount)} />
+            <Stat label="Forks" value={formatCount(repo.forksCount)} />
+            <Stat label="Open issues" value={formatCount(repo.openIssues)} />
+            <Stat
+              label="Language"
+              value={
+                repo.language ? (
+                  <button
+                    type="button"
+                    className="inline-flex items-center gap-1.5 hover:underline"
+                    onClick={() => setLanguage(repo.language)}
+                  >
+                    <span
+                      className="size-2.5 rounded-full"
+                      style={{
+                        backgroundColor: languageColor(repo.language),
+                      }}
+                    />
+                    {repo.language}
+                  </button>
+                ) : (
+                  "—"
+                )
+              }
+            />
+            <Stat label="Starred" value={formatRelative(repo.starredAt)} />
+            <Stat label="Pushed" value={formatRelative(repo.pushedAt)} />
+            <Stat label="Created" value={formatRelative(repo.repoCreatedAt)} />
+            <Stat label="Fetched" value={formatRelative(repo.fetchedAt)} />
+          </div>
+
+          {repo.topics.length > 0 ? (
+            <div>
+              <p className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                Topics
+              </p>
+              <div className="flex flex-wrap gap-1.5">
+                {repo.topics.map((t) => (
+                  <button key={t} type="button" onClick={() => setTopic(t)}>
+                    <Badge
+                      variant="outline"
+                      className="cursor-pointer font-normal"
+                    >
+                      {t}
+                    </Badge>
+                  </button>
+                ))}
+              </div>
+            </div>
+          ) : null}
+
+          <div>
+            <p className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+              Category
+            </p>
+            <div className="flex flex-col gap-2">
+              <div className="flex flex-wrap items-center gap-2">
+                {repo.categoryNames.length > 0 ? (
+                  repo.categoryNames.map((c) => (
+                    <Badge key={c} variant="secondary">
+                      {c}
+                    </Badge>
+                  ))
+                ) : (
+                  <span className="text-sm text-muted-foreground">
+                    Uncategorized
+                  </span>
+                )}
+                {repo.categorySource ? (
+                  <Badge variant="outline">
+                    {repo.categorySource === "manual" ? "Manual" : "LLM"}
+                  </Badge>
+                ) : null}
+              </div>
+              {flatCats.length > 0 ? (
+                <Select
+                  value={repo.categoryId != null ? String(repo.categoryId) : ""}
+                  onValueChange={(v) => {
+                    const id = Number(v);
+                    if (Number.isFinite(id)) {
+                      setCategory.mutate(id);
+                    }
+                  }}
+                >
+                  <SelectTrigger className="w-full">
+                    <SelectValue placeholder="Set category manually…" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {flatCats.map((c) => (
+                      <SelectItem key={c.id} value={String(c.id)}>
+                        {c.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              ) : (
+                <p className="text-xs text-muted-foreground">
+                  Commit a taxonomy in Categories first.
+                </p>
+              )}
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="w-fit gap-1"
+                disabled={
+                  offline ||
+                  isManual ||
+                  flatCats.length === 0 ||
+                  recategorize.isPending
+                }
+                title={
+                  isManual
+                    ? "Manual override — clear via picker change only"
+                    : offline
+                      ? ollamaAvailabilityLabel(false)
+                      : undefined
+                }
+                onClick={() => recategorize.mutate()}
+              >
+                {recategorize.isPending ? (
+                  <Loader2 className="size-3 animate-spin" />
+                ) : null}
+                Re-categorize with LLM
+              </Button>
+              {recategorize.isError ? (
+                <p className="text-xs text-destructive">
+                  {(recategorize.error as { message?: string })?.message ??
+                    "Re-categorize failed"}
+                </p>
+              ) : null}
+            </div>
+          </div>
+
+          <div>
+            <p className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+              Review
+            </p>
+            <p className="mb-2 text-xs text-muted-foreground">
+              Local only — never stars or unstars on GitHub.
+            </p>
+            <div className="flex flex-wrap items-center gap-2">
+              {repo.reviewedAt ? (
+                <Badge variant="secondary">
+                  Reviewed {formatRelative(repo.reviewedAt)}
+                </Badge>
+              ) : null}
+              {repo.snoozedUntil ? (
+                <Badge variant="outline">
+                  Snoozed until {repo.snoozedUntil.slice(0, 10)}
+                </Badge>
+              ) : null}
+            </div>
+            <div className="mt-2 flex flex-wrap items-center gap-2">
+              {repo.reviewedAt ? (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  disabled={reviewMutation.isPending}
+                  onClick={() =>
+                    reviewMutation.mutate({
+                      repoId,
+                      reviewed: false,
+                      snoozeDays: null,
+                    })
+                  }
+                >
+                  Undo reviewed
+                </Button>
+              ) : (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  disabled={reviewMutation.isPending}
+                  onClick={() =>
+                    reviewMutation.mutate({
+                      repoId,
+                      reviewed: true,
+                      snoozeDays: null,
+                    })
+                  }
+                >
+                  Mark reviewed
+                </Button>
+              )}
+              {repo.snoozedUntil ? (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="ghost"
+                  disabled={reviewMutation.isPending}
+                  onClick={() =>
+                    reviewMutation.mutate({
+                      repoId,
+                      reviewed: null,
+                      snoozeDays: 0,
+                    })
+                  }
+                >
+                  Clear snooze
+                </Button>
+              ) : (
+                <Select
+                  onValueChange={(v) => {
+                    const days = Number(v);
+                    if (Number.isFinite(days)) {
+                      reviewMutation.mutate({
+                        repoId,
+                        reviewed: null,
+                        snoozeDays: days,
+                      });
+                    }
+                  }}
+                >
+                  <SelectTrigger
+                    className="h-8 w-36"
+                    aria-label="Snooze review"
+                  >
+                    <SelectValue placeholder="Snooze…" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {SNOOZE_OPTIONS.map((opt) => (
+                      <SelectItem key={opt.days} value={String(opt.days)}>
+                        {opt.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              )}
+            </div>
+          </div>
+
+          <Separator />
+
+          <div>
+            <p className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+              README excerpt
+            </p>
+            {repo.readmeExcerpt == null ? (
+              <p className="text-sm text-muted-foreground">
+                Not fetched yet — still in the README queue.
+              </p>
+            ) : repo.readmeExcerpt === "" ? (
+              <p className="text-sm text-muted-foreground">
+                No README available for this repository.
+              </p>
+            ) : (
+              <Suspense
+                fallback={
+                  <p className="text-sm text-muted-foreground">
+                    Loading README…
+                  </p>
+                }
+              >
+                <MarkdownExcerpt markdown={repo.readmeExcerpt} />
+              </Suspense>
+            )}
+          </div>
+
+          <div className="flex flex-col gap-2">
+            <Button
+              type="button"
+              className="w-full gap-2"
+              onClick={() => void openUrl(repo.htmlUrl)}
+            >
+              <ExternalLink className="size-4" />
+              Open on GitHub
+            </Button>
+            {repo.homepage ? (
+              <Button
+                type="button"
+                variant="outline"
+                className="w-full gap-2"
+                onClick={() => void openUrl(repo.homepage as string)}
+              >
+                Homepage
+              </Button>
+            ) : null}
+          </div>
+        </div>
+      ) : null}
+    </div>
   );
 
   if (!overlay) {
-    return panel;
+    return (
+      <aside
+        className="flex h-full w-[min(380px,100%)] shrink-0 flex-col border-l border-border bg-background"
+        aria-label="Repository details"
+      >
+        {header}
+        {body}
+      </aside>
+    );
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex justify-end">
-      <button
-        type="button"
-        className="absolute inset-0 bg-foreground/30"
-        aria-label="Close detail"
-        onClick={() => setSelectedRepoId(null)}
-      />
-      <div className="relative flex h-full w-full max-w-lg">{panel}</div>
-    </div>
+    <Dialog
+      open
+      onOpenChange={(next) => {
+        if (!next) {
+          setSelectedRepoId(null);
+        }
+      }}
+    >
+      <DialogContent aria-describedby="repo-detail-desc">
+        <DialogDescription id="repo-detail-desc" className="sr-only">
+          Repository metadata, category assignment, and local review actions.
+        </DialogDescription>
+        {header}
+        {body}
+      </DialogContent>
+    </Dialog>
   );
 }
 

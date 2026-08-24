@@ -3,17 +3,31 @@ import {
   useQuery,
   useQueryClient,
 } from "@tanstack/react-query";
-import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useDeferredValue,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { CategoryTree } from "@/components/library/CategoryTree";
 import { LibraryEmptyState } from "@/components/library/LibraryEmptyState";
 import { LibraryToolbar } from "@/components/library/LibraryToolbar";
 import { RepoDetailPanel } from "@/components/library/RepoDetailPanel";
 import { RepoVirtualList } from "@/components/library/RepoVirtualList";
 import { OnboardingGuide } from "@/components/OnboardingGuide";
+import { Button } from "@/components/ui/button";
 import { nextEscapeAction } from "@/lib/keyboard";
 import { selectEmptyState } from "@/lib/libraryEmpty";
 import { hasClearableLibraryState } from "@/lib/libraryFilters";
 import { onboardingSurface } from "@/lib/onboarding";
+import {
+  createPendingAdvance,
+  type PendingAdvance,
+  resolvePendingAdvance,
+  serializeListGeneration,
+} from "@/lib/pendingAdvance";
 import { reviewPresetMeta } from "@/lib/review";
 import {
   getReviewCounts,
@@ -42,7 +56,7 @@ export function LibraryView() {
   const queryClient = useQueryClient();
   const wide = useWideLayout();
   const dockedDetail = useDockedDetail();
-  const pendingAdvance = useRef(false);
+  const pendingAdvance = useRef<PendingAdvance | null>(null);
 
   const query = useUiStore((s) => s.query);
   const debouncedQuery = useDebouncedValue(query, 150);
@@ -136,6 +150,19 @@ export function LibraryView() {
     queryFn: getReviewCounts,
   });
 
+  const listGeneration = serializeListGeneration({
+    query: deferredQuery,
+    language,
+    topic,
+    categoryId,
+    reviewPreset,
+    hideUnstarred,
+    hideArchived,
+    sort,
+    sortDesc,
+    searchMode,
+  });
+
   const emptyKind = selectEmptyState({
     total,
     loading: reposQuery.isLoading || setupQuery.isLoading,
@@ -154,18 +181,77 @@ export function LibraryView() {
   });
 
   useEffect(() => {
-    if (!pendingAdvance.current || items.length === 0) {
+    const result = resolvePendingAdvance({
+      pending: pendingAdvance.current,
+      generation: listGeneration,
+      selectedId: selectedRepoId,
+      itemIds: items.map((item) => item.id),
+      fetchFailed: reposQuery.isFetchNextPageError,
+      fetchSettled: !reposQuery.isFetchingNextPage,
+    });
+    if (result.kind === "clear") {
+      pendingAdvance.current = null;
       return;
     }
-    const idx = items.findIndex((r) => r.id === selectedRepoId);
-    if (idx >= 0 && idx < items.length - 1) {
-      setSelectedRepoId(items[idx + 1].id);
-      pendingAdvance.current = false;
+    if (result.kind === "select") {
+      pendingAdvance.current = null;
+      setSelectedRepoId(result.id);
     }
-  }, [items, selectedRepoId, setSelectedRepoId]);
+  }, [
+    listGeneration,
+    selectedRepoId,
+    items,
+    reposQuery.isFetchNextPageError,
+    reposQuery.isFetchingNextPage,
+    setSelectedRepoId,
+  ]);
+
+  const navRef = useRef({
+    items,
+    selectedRepoId,
+    query,
+    language,
+    topic,
+    categoryId,
+    reviewPreset,
+    hideUnstarred,
+    hideArchived,
+    sort,
+    sortDesc,
+    listGeneration,
+    overlayBlocksNav: !dockedDetail && selectedRepoId != null,
+    hasNextPage: reposQuery.hasNextPage,
+    isFetchingNextPage: reposQuery.isFetchingNextPage,
+    fetchFailed: reposQuery.isFetchNextPageError,
+    fetchNextPage: () => {
+      void reposQuery.fetchNextPage();
+    },
+  });
+  navRef.current = {
+    items,
+    selectedRepoId,
+    query,
+    language,
+    topic,
+    categoryId,
+    reviewPreset,
+    hideUnstarred,
+    hideArchived,
+    sort,
+    sortDesc,
+    listGeneration,
+    overlayBlocksNav: !dockedDetail && selectedRepoId != null,
+    hasNextPage: reposQuery.hasNextPage,
+    isFetchingNextPage: reposQuery.isFetchingNextPage,
+    fetchFailed: reposQuery.isFetchNextPageError,
+    fetchNextPage: () => {
+      void reposQuery.fetchNextPage();
+    },
+  };
 
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
+      const s = navRef.current;
       const target = e.target as HTMLElement | null;
       const typing =
         target &&
@@ -174,7 +260,7 @@ export function LibraryView() {
           target.tagName === "SELECT" ||
           target.isContentEditable);
 
-      if (e.key === "/" && !typing) {
+      if (e.key === "/" && !typing && !s.overlayBlocksNav) {
         e.preventDefault();
         searchRef.current?.focus();
         return;
@@ -182,17 +268,17 @@ export function LibraryView() {
 
       if (e.key === "Escape") {
         const action = nextEscapeAction({
-          detailOpen: selectedRepoId != null,
-          hasQuery: Boolean(query),
+          detailOpen: s.selectedRepoId != null,
+          hasQuery: Boolean(s.query),
           hasFiltersOrReview: hasClearableLibraryState({
-            language,
-            topic,
-            categoryId,
-            reviewPreset,
-            hideUnstarred,
-            hideArchived,
-            sort,
-            sortDesc,
+            language: s.language,
+            topic: s.topic,
+            categoryId: s.categoryId,
+            reviewPreset: s.reviewPreset,
+            hideUnstarred: s.hideUnstarred,
+            hideArchived: s.hideArchived,
+            sort: s.sort,
+            sortDesc: s.sortDesc,
           }),
         });
         if (action === "close-detail") {
@@ -205,55 +291,59 @@ export function LibraryView() {
         return;
       }
 
-      if (typing) {
+      if (typing || s.overlayBlocksNav) {
         return;
       }
 
       if (e.key === "ArrowDown" || e.key === "ArrowUp") {
         e.preventDefault();
-        document
-          .getElementById("library-repo-listbox")
-          ?.focus({ preventScroll: true });
-        if (items.length === 0) {
+        if (s.items.length === 0) {
           return;
         }
-        const idx = items.findIndex((r) => r.id === selectedRepoId);
+        const idx = s.items.findIndex((r) => r.id === s.selectedRepoId);
         let next = idx;
         if (e.key === "ArrowDown") {
-          next = idx < 0 ? 0 : Math.min(items.length - 1, idx + 1);
-          if (
-            next === items.length - 1 &&
-            reposQuery.hasNextPage &&
-            !reposQuery.isFetchingNextPage
-          ) {
-            pendingAdvance.current = true;
-            void reposQuery.fetchNextPage();
+          next = idx < 0 ? 0 : Math.min(s.items.length - 1, idx + 1);
+          if (next === s.items.length - 1) {
+            pendingAdvance.current = createPendingAdvance({
+              generation: s.listGeneration,
+              sourceId: s.items[next].id,
+              hasNextPage: Boolean(s.hasNextPage),
+              isFetchingNextPage: s.isFetchingNextPage,
+              fetchFailed: s.fetchFailed,
+            });
+            if (pendingAdvance.current) {
+              s.fetchNextPage();
+            }
           }
         } else {
           next = idx < 0 ? 0 : Math.max(0, idx - 1);
         }
-        setSelectedRepoId(items[next].id);
+        const nextId = s.items[next].id;
+        setSelectedRepoId(nextId);
+        document
+          .getElementById(`library-repo-${nextId}`)
+          ?.focus({ preventScroll: true });
       }
     }
 
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
+  }, [setSelectedRepoId, setQuery, clearFilters]);
+
+  const onEndReached = useCallback(() => {
+    if (
+      reposQuery.hasNextPage &&
+      !reposQuery.isFetchingNextPage &&
+      !reposQuery.isFetchNextPageError
+    ) {
+      void reposQuery.fetchNextPage();
+    }
   }, [
-    items,
-    selectedRepoId,
-    setSelectedRepoId,
-    query,
-    setQuery,
-    language,
-    topic,
-    categoryId,
-    reviewPreset,
-    hideUnstarred,
-    hideArchived,
-    sort,
-    sortDesc,
-    clearFilters,
-    reposQuery,
+    reposQuery.hasNextPage,
+    reposQuery.isFetchingNextPage,
+    reposQuery.isFetchNextPageError,
+    reposQuery.fetchNextPage,
   ]);
 
   if (emptyKind === "onboarding") {
@@ -308,21 +398,41 @@ export function LibraryView() {
                 Loading library…
               </div>
             ) : emptyKind === "has-results" || items.length > 0 ? (
-              <RepoVirtualList
-                items={items}
-                layout={layout}
-                selectedId={selectedRepoId}
-                onSelect={setSelectedRepoId}
-                reviewMode={reviewPreset != null}
-                onEndReached={() => {
-                  if (
-                    reposQuery.hasNextPage &&
-                    !reposQuery.isFetchingNextPage
-                  ) {
-                    void reposQuery.fetchNextPage();
-                  }
-                }}
-              />
+              <div className="flex h-full min-h-0 flex-col">
+                <div className="min-h-0 flex-1">
+                  <RepoVirtualList
+                    items={items}
+                    layout={layout}
+                    selectedId={selectedRepoId}
+                    onSelect={setSelectedRepoId}
+                    reviewMode={reviewPreset != null}
+                    total={total}
+                    listGeneration={listGeneration}
+                    hasNextPage={Boolean(reposQuery.hasNextPage)}
+                    isFetchingNextPage={reposQuery.isFetchingNextPage}
+                    fetchFailed={reposQuery.isFetchNextPageError}
+                    onEndReached={onEndReached}
+                  />
+                </div>
+                {reposQuery.isFetchNextPageError ? (
+                  <div
+                    className="flex shrink-0 items-center justify-between gap-3 border-t border-border px-4 py-2"
+                    role="alert"
+                  >
+                    <p className="text-sm text-destructive">
+                      Could not load more repositories.
+                    </p>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      onClick={() => void reposQuery.fetchNextPage()}
+                    >
+                      Retry
+                    </Button>
+                  </div>
+                ) : null}
+              </div>
             ) : emptyKind !== "setup-error" ? (
               <LibraryEmptyState
                 kind={emptyKind}
