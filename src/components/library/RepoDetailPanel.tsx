@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { ExternalLink, Loader2, X } from "lucide-react";
-import { MarkdownExcerpt } from "@/components/library/MarkdownExcerpt";
+import { lazy, Suspense } from "react";
 import { RepoAvatar } from "@/components/library/RepoAvatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -13,8 +13,10 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
+import { flattenCategories } from "@/lib/categories";
 import { formatCount, formatRelative, languageColor } from "@/lib/format";
 import { SNOOZE_OPTIONS } from "@/lib/review";
+import { ollamaAvailabilityLabel } from "@/lib/statusCopy";
 import {
   getOllamaStatus,
   getRepo,
@@ -23,27 +25,19 @@ import {
   setRepoCategory,
   setRepoReview,
 } from "@/lib/tauri";
+import { cn } from "@/lib/utils";
 import { useUiStore } from "@/store/ui";
-import type { CategoryNode } from "@/types";
+
+const MarkdownExcerpt = lazy(
+  () => import("@/components/library/MarkdownExcerpt"),
+);
 
 type Props = {
   repoId: number;
+  variant?: "docked" | "overlay";
 };
 
-function flattenCategories(
-  nodes: CategoryNode[],
-  prefix = "",
-): { id: number; label: string }[] {
-  const out: { id: number; label: string }[] = [];
-  for (const node of nodes) {
-    const label = prefix ? `${prefix} / ${node.name}` : node.name;
-    out.push({ id: node.id, label });
-    out.push(...flattenCategories(node.children, label));
-  }
-  return out;
-}
-
-export function RepoDetailPanel({ repoId }: Props) {
+export function RepoDetailPanel({ repoId, variant = "docked" }: Props) {
   const queryClient = useQueryClient();
   const setSelectedRepoId = useUiStore((s) => s.setSelectedRepoId);
   const setTopic = useUiStore((s) => s.setTopic);
@@ -97,9 +91,21 @@ export function RepoDetailPanel({ repoId }: Props) {
   const flatCats = flattenCategories(categories.data ?? []);
   const offline = ollama.data != null && !ollama.data.available;
   const isManual = repo?.categorySource === "manual";
+  const overlay = variant === "overlay";
 
-  return (
-    <aside className="flex h-full w-[380px] shrink-0 flex-col border-l border-border bg-background">
+  const PanelTag = overlay ? "div" : "aside";
+  const panel = (
+    <PanelTag
+      className={cn(
+        "flex min-h-0 flex-col border-border bg-background",
+        overlay
+          ? "h-full w-full max-w-lg border-l shadow-none"
+          : "h-full w-[min(380px,100%)] shrink-0 border-l",
+      )}
+      role={overlay ? "dialog" : "complementary"}
+      aria-modal={overlay ? true : undefined}
+      aria-label="Repository details"
+    >
       <div className="flex items-center justify-between border-b border-border px-4 py-3">
         <p className="text-sm font-medium">Details</p>
         <Button
@@ -109,6 +115,7 @@ export function RepoDetailPanel({ repoId }: Props) {
           className="h-8 w-8 p-0"
           onClick={() => setSelectedRepoId(null)}
           aria-label="Close detail"
+          autoFocus={overlay}
         >
           <X className="size-4" />
         </Button>
@@ -149,7 +156,7 @@ export function RepoDetailPanel({ repoId }: Props) {
               </div>
             </div>
 
-            <div className="grid grid-cols-2 gap-3 text-sm">
+            <div className="grid grid-cols-1 gap-3 text-sm sm:grid-cols-2">
               <Stat label="Stars" value={formatCount(repo.starsCount)} />
               <Stat label="Forks" value={formatCount(repo.forksCount)} />
               <Stat label="Open issues" value={formatCount(repo.openIssues)} />
@@ -270,7 +277,7 @@ export function RepoDetailPanel({ repoId }: Props) {
                     isManual
                       ? "Manual override — clear via picker change only"
                       : offline
-                        ? "Ollama offline"
+                        ? ollamaAvailabilityLabel(false)
                         : undefined
                   }
                   onClick={() => recategorize.mutate()}
@@ -309,46 +316,83 @@ export function RepoDetailPanel({ repoId }: Props) {
                 ) : null}
               </div>
               <div className="mt-2 flex flex-wrap items-center gap-2">
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  disabled={
-                    reviewMutation.isPending || Boolean(repo.reviewedAt)
-                  }
-                  onClick={() =>
-                    reviewMutation.mutate({
-                      repoId,
-                      reviewed: true,
-                      snoozeDays: null,
-                    })
-                  }
-                >
-                  Mark reviewed
-                </Button>
-                <Select
-                  onValueChange={(v) => {
-                    const days = Number(v);
-                    if (Number.isFinite(days)) {
+                {repo.reviewedAt ? (
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    disabled={reviewMutation.isPending}
+                    onClick={() =>
+                      reviewMutation.mutate({
+                        repoId,
+                        reviewed: false,
+                        snoozeDays: null,
+                      })
+                    }
+                  >
+                    Undo reviewed
+                  </Button>
+                ) : (
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    disabled={reviewMutation.isPending}
+                    onClick={() =>
+                      reviewMutation.mutate({
+                        repoId,
+                        reviewed: true,
+                        snoozeDays: null,
+                      })
+                    }
+                  >
+                    Mark reviewed
+                  </Button>
+                )}
+                {repo.snoozedUntil ? (
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="ghost"
+                    disabled={reviewMutation.isPending}
+                    onClick={() =>
                       reviewMutation.mutate({
                         repoId,
                         reviewed: null,
-                        snoozeDays: days,
-                      });
+                        snoozeDays: 0,
+                      })
                     }
-                  }}
-                >
-                  <SelectTrigger className="h-8 w-36">
-                    <SelectValue placeholder="Snooze…" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {SNOOZE_OPTIONS.map((opt) => (
-                      <SelectItem key={opt.days} value={String(opt.days)}>
-                        {opt.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                  >
+                    Clear snooze
+                  </Button>
+                ) : (
+                  <Select
+                    onValueChange={(v) => {
+                      const days = Number(v);
+                      if (Number.isFinite(days)) {
+                        reviewMutation.mutate({
+                          repoId,
+                          reviewed: null,
+                          snoozeDays: days,
+                        });
+                      }
+                    }}
+                  >
+                    <SelectTrigger
+                      className="h-8 w-36"
+                      aria-label="Snooze review"
+                    >
+                      <SelectValue placeholder="Snooze…" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {SNOOZE_OPTIONS.map((opt) => (
+                        <SelectItem key={opt.days} value={String(opt.days)}>
+                          {opt.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                )}
               </div>
             </div>
 
@@ -367,7 +411,15 @@ export function RepoDetailPanel({ repoId }: Props) {
                   No README available for this repository.
                 </p>
               ) : (
-                <MarkdownExcerpt markdown={repo.readmeExcerpt} />
+                <Suspense
+                  fallback={
+                    <p className="text-sm text-muted-foreground">
+                      Loading README…
+                    </p>
+                  }
+                >
+                  <MarkdownExcerpt markdown={repo.readmeExcerpt} />
+                </Suspense>
               )}
             </div>
 
@@ -394,7 +446,23 @@ export function RepoDetailPanel({ repoId }: Props) {
           </div>
         ) : null}
       </div>
-    </aside>
+    </PanelTag>
+  );
+
+  if (!overlay) {
+    return panel;
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex justify-end">
+      <button
+        type="button"
+        className="absolute inset-0 bg-foreground/30"
+        aria-label="Close detail"
+        onClick={() => setSelectedRepoId(null)}
+      />
+      <div className="relative flex h-full w-full max-w-lg">{panel}</div>
+    </div>
   );
 }
 
