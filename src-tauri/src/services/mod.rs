@@ -9,6 +9,7 @@ pub mod jobs;
 pub mod logging;
 pub mod ollama;
 pub mod repos;
+pub mod review;
 pub mod sanitize;
 pub mod search;
 pub mod secrets;

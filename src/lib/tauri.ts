@@ -16,7 +16,9 @@ import type {
   RepoDetail,
   RepoFilters,
   RepoListResult,
+  ReviewCounts,
   SearchReposRequest,
+  SetRepoReviewRequest,
   SetupStatus,
   SharePoint,
   SyncResult,
@@ -187,4 +189,12 @@ export function getSetupStatus() {
 
 export function setOnboardingCompleted(completed: boolean) {
   return invoke<SetupStatus>("set_onboarding_completed", { completed });
+}
+
+export function getReviewCounts() {
+  return invoke<ReviewCounts>("get_review_counts");
+}
+
+export function setRepoReview(request: SetRepoReviewRequest) {
+  return invoke<void>("set_repo_review", { request });
 }

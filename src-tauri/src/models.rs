@@ -210,6 +210,9 @@ pub struct RepoSummary {
     /// Normalized fused relevance (0–100) for Semantic/Hybrid hits; absent for keyword/browse.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub relevance: Option<u8>,
+    /// Why this repo is in the active review queue (preset reason copy).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub review_reason: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -239,6 +242,8 @@ pub struct RepoDetail {
     pub category_names: Vec<String>,
     pub category_id: Option<i64>,
     pub category_source: Option<String>,
+    pub reviewed_at: Option<String>,
+    pub snoozed_until: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -250,6 +255,20 @@ pub struct RepoFilters {
     pub hide_unstarred: Option<bool>,
     pub hide_archived: Option<bool>,
     pub archived_only: Option<bool>,
+    /// Local review queue preset. When set, reviewed/snoozed rows are excluded.
+    #[serde(default)]
+    pub review_preset: Option<ReviewPreset>,
+}
+
+/// First-class Library review queues. Local-only — no GitHub star writes.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum ReviewPreset {
+    Uncategorized,
+    Archived,
+    Inactive,
+    Forgotten,
+    Unstarred,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
@@ -260,6 +279,8 @@ pub enum RepoSort {
     Stars,
     PushedAt,
     Name,
+    /// Oldest / most stale first (null `pushed_at`, then oldest push, then oldest star).
+    Stale,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -595,4 +616,27 @@ pub struct SetupStatus {
     /// embedded_repos / repo_count, or 0 when empty.
     pub embedding_coverage: f64,
     pub onboarding_completed: bool,
+}
+
+/// Queue sizes for review presets (active counts exclude unstarred except `unstarred`).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReviewCounts {
+    pub uncategorized: i64,
+    pub archived: i64,
+    pub inactive: i64,
+    pub forgotten: i64,
+    pub unstarred: i64,
+    /// Currently starred repos (`unstarred = 0`), including archived.
+    pub active_stars: i64,
+    pub oldest_starred_at: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SetRepoReviewRequest {
+    pub repo_id: i64,
+    pub reviewed: Option<bool>,
+    /// `7 | 30 | 90 | 180` to snooze, `0` to clear. Ignored when `reviewed` is true.
+    pub snooze_days: Option<i64>,
 }

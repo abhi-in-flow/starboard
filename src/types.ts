@@ -65,7 +65,14 @@ export type IntegrityReport = {
   checkedAt: string;
 };
 
-export type RepoSort = "starredAt" | "stars" | "pushedAt" | "name";
+export type RepoSort = "starredAt" | "stars" | "pushedAt" | "name" | "stale";
+
+export type ReviewPreset =
+  | "uncategorized"
+  | "archived"
+  | "inactive"
+  | "forgotten"
+  | "unstarred";
 
 export type RepoFilters = {
   language?: string | null;
@@ -74,6 +81,7 @@ export type RepoFilters = {
   hideUnstarred?: boolean;
   hideArchived?: boolean;
   archivedOnly?: boolean;
+  reviewPreset?: ReviewPreset | null;
 };
 
 export type RepoSummary = {
@@ -89,6 +97,8 @@ export type RepoSummary = {
   topics: string[];
   /** Normalized fused relevance 0–100 for Semantic/Hybrid; absent for keyword/browse. */
   relevance?: number | null;
+  /** Why this repo is in the active review queue. */
+  reviewReason?: string | null;
 };
 
 export type RepoDetail = {
@@ -116,6 +126,8 @@ export type RepoDetail = {
   categoryNames: string[];
   categoryId: number | null;
   categorySource: string | null;
+  reviewedAt: string | null;
+  snoozedUntil: string | null;
 };
 
 export type FacetCount = {
@@ -348,4 +360,20 @@ export type SetupStatus = {
   embeddedRepos: number;
   embeddingCoverage: number;
   onboardingCompleted: boolean;
+};
+
+export type ReviewCounts = {
+  uncategorized: number;
+  archived: number;
+  inactive: number;
+  forgotten: number;
+  unstarred: number;
+  activeStars: number;
+  oldestStarredAt: string | null;
+};
+
+export type SetRepoReviewRequest = {
+  repoId: number;
+  reviewed?: boolean | null;
+  snoozeDays?: number | null;
 };

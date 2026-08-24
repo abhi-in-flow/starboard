@@ -8,6 +8,7 @@ use crate::error::{AppError, AppResult};
 use crate::models::{RepoListResult, RepoSummary, SearchMode, SearchReposRequest};
 use crate::services::ollama::OllamaClient;
 use crate::services::repos::{self, build_filter_clause, order_by_clause};
+use crate::services::review;
 use crate::services::settings;
 use crate::services::store::DbState;
 
@@ -272,6 +273,7 @@ fn search_keyword(conn: &Connection, req: SearchReposRequest) -> AppResult<RepoL
     for row in rows {
         items.push(row?);
     }
+    review::attach_review_reason(&mut items, filters.review_preset.as_ref());
 
     Ok(RepoListResult {
         items,
@@ -434,11 +436,12 @@ fn materialize_ranked(
     let total = ordered.len() as i64;
     let start = offset as usize;
     let end = (offset + limit).min(total) as usize;
-    let items = if start >= ordered.len() {
+    let mut items = if start >= ordered.len() {
         Vec::new()
     } else {
         ordered[start..end.min(ordered.len())].to_vec()
     };
+    review::attach_review_reason(&mut items, filters.review_preset.as_ref());
 
     Ok(RepoListResult {
         items,
@@ -464,6 +467,7 @@ fn map_summary_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<RepoSummary> {
         topics: serde_json::from_str(&topics_raw.unwrap_or_else(|| "[]".into()))
             .unwrap_or_default(),
         relevance: None,
+        review_reason: None,
     })
 }
 

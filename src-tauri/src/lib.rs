@@ -9,8 +9,7 @@ pub use services::sanitize::is_safe_markdown_url;
 
 use tauri::Manager;
 
-use commands::{auth, categorize, embed, insights, repos, settings, setup, status, sync};
-use services::categorizer::CategorizeState;
+use commands::{auth, categorize, embed, insights, repos, review, settings, setup, status, sync};use services::categorizer::CategorizeState;
 use services::embed::EmbedState;
 use services::store::{self, DbState};
 use services::sync::SyncState;
@@ -52,6 +51,8 @@ pub fn run() {
             repos::get_repo,
             repos::get_library_facets,
             repos::list_categories,
+            review::get_review_counts,
+            review::set_repo_review,
             categorize::get_ollama_status,
             categorize::generate_taxonomy,
             categorize::get_taxonomy_edit,
