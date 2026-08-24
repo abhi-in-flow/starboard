@@ -74,6 +74,8 @@ export type RepoSummary = {
   archived: boolean;
   unstarred: boolean;
   topics: string[];
+  /** Normalized fused relevance 0–100 for Semantic/Hybrid; absent for keyword/browse. */
+  relevance?: number | null;
 };
 
 export type RepoDetail = {
@@ -288,4 +290,30 @@ export type InsightsDashboard = {
 export type LibraryExport = {
   markdown: string;
   json: string;
+};
+
+export type EmbeddingsPanel = {
+  model: string;
+  dimension: number;
+  totalRepos: number;
+  embeddedRepos: number;
+  staleRepos: number;
+  missingRepos: number;
+  coverage: number;
+  lastEmbedAt: string | null;
+  needRebuild: boolean;
+};
+
+export type CategorizationPanel = {
+  totalRepos: number;
+  categorizedRepos: number;
+  uncategorizedRepos: number;
+  llmAssignments: number;
+  manualAssignments: number;
+  categories: CategoryNode[];
+};
+
+export type SystemStatus = {
+  embeddings: EmbeddingsPanel;
+  categorization: CategorizationPanel;
 };

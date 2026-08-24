@@ -254,6 +254,7 @@ fn map_summary(row: &Row<'_>) -> rusqlite::Result<RepoSummary> {
         archived: row.get::<_, i64>(7)? != 0,
         unstarred: row.get::<_, i64>(8)? != 0,
         topics: parse_topics(topics_raw),
+        relevance: None,
     })
 }
 

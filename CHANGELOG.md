@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.7.0
+
+- Semantic/Hybrid search shows a Sorted by relevance indicator and disables the library sort control while a query is active.
+- Result rows show a normalized relevance badge (top hit = 100%) for Semantic/Hybrid hits.
+- Settings gains a Status tab with embeddings coverage and categorization admin aggregates.
+
 ## 0.6.0 — Phase 5
 
 - Insights dashboard: starring timeline, local-TZ rhythm heatmap, interest drift (with subcategory drill-down), language trend, Rising/Dormant/Steady metrics, and fun facts.

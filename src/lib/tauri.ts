@@ -19,6 +19,7 @@ import type {
   SharePoint,
   SyncResult,
   SyncStatus,
+  SystemStatus,
   TaxonomyDraft,
   TaxonomyEdit,
   UpdateSettingsRequest,
@@ -152,4 +153,8 @@ export function getLibraryExport() {
 
 export function writeLibraryExport(path: string, format: "markdown" | "json") {
   return invoke<void>("write_library_export", { path, format });
+}
+
+export function getSystemStatus() {
+  return invoke<SystemStatus>("get_system_status");
 }

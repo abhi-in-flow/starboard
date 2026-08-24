@@ -10,5 +10,6 @@ pub mod repos;
 pub mod search;
 pub mod secrets;
 pub mod settings;
+pub mod status;
 pub mod store;
 pub mod sync;

@@ -3,6 +3,7 @@ import { Star } from "lucide-react";
 import { useRef } from "react";
 import { REPO_DND_TYPE } from "@/components/library/CategoryTree";
 import { RepoAvatar } from "@/components/library/RepoAvatar";
+import { Badge } from "@/components/ui/badge";
 import { formatCount, formatRelative, languageColor } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import type { LibraryLayout } from "@/store/ui";
@@ -39,6 +40,10 @@ function RepoRow({
 }) {
   const { owner, name } = repoNameParts(repo.fullName);
   const topics = repo.topics.slice(0, compact ? 2 : 4);
+  const relevance =
+    typeof repo.relevance === "number" && Number.isFinite(repo.relevance)
+      ? Math.round(repo.relevance)
+      : null;
 
   return (
     <button
@@ -87,6 +92,15 @@ function RepoRow({
         </div>
 
         <div className="mt-2 flex flex-wrap items-center gap-1.5">
+          {relevance != null ? (
+            <Badge
+              variant="secondary"
+              className="rounded-full px-2 py-0.5 font-normal text-[11px] text-muted-foreground"
+              title="Relevance vs top result"
+            >
+              {relevance}%
+            </Badge>
+          ) : null}
           {repo.language ? (
             <span className="inline-flex items-center gap-1.5 rounded-md bg-muted/80 px-2 py-0.5 text-[11px] text-foreground">
               <span

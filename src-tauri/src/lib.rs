@@ -5,7 +5,7 @@ mod services;
 
 use tauri::Manager;
 
-use commands::{auth, categorize, embed, insights, repos, settings, sync};
+use commands::{auth, categorize, embed, insights, repos, settings, status, sync};
 use services::categorizer::CategorizeState;
 use services::embed::EmbedState;
 use services::store::{self, DbState};
@@ -59,6 +59,7 @@ pub fn run() {
             insights::get_interest_drift_drilldown,
             insights::get_library_export,
             insights::write_library_export,
+            status::get_system_status,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
