@@ -18,7 +18,11 @@ import { RepoDetailPanel } from "@/components/library/RepoDetailPanel";
 import { RepoVirtualList } from "@/components/library/RepoVirtualList";
 import { OnboardingGuide } from "@/components/OnboardingGuide";
 import { Button } from "@/components/ui/button";
-import { nextEscapeAction } from "@/lib/keyboard";
+import {
+  keyOwnerFromEventTarget,
+  nextEscapeAction,
+  shouldHandleLibraryNavKeys,
+} from "@/lib/keyboard";
 import { selectEmptyState } from "@/lib/libraryEmpty";
 import { hasClearableLibraryState } from "@/lib/libraryFilters";
 import { onboardingSurface } from "@/lib/onboarding";
@@ -252,21 +256,28 @@ export function LibraryView() {
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
       const s = navRef.current;
-      const target = e.target as HTMLElement | null;
-      const typing =
-        target &&
-        (target.tagName === "INPUT" ||
-          target.tagName === "TEXTAREA" ||
-          target.tagName === "SELECT" ||
-          target.isContentEditable);
+      const ownsNavKeys =
+        e.key === "/" || e.key === "ArrowDown" || e.key === "ArrowUp";
+      if (
+        ownsNavKeys &&
+        !shouldHandleLibraryNavKeys({
+          defaultPrevented: e.defaultPrevented,
+          target: keyOwnerFromEventTarget(e.target),
+        })
+      ) {
+        return;
+      }
 
-      if (e.key === "/" && !typing && !s.overlayBlocksNav) {
+      if (e.key === "/" && !s.overlayBlocksNav) {
         e.preventDefault();
         searchRef.current?.focus();
         return;
       }
 
       if (e.key === "Escape") {
+        if (e.defaultPrevented) {
+          return;
+        }
         const action = nextEscapeAction({
           detailOpen: s.selectedRepoId != null,
           hasQuery: Boolean(s.query),
@@ -291,7 +302,7 @@ export function LibraryView() {
         return;
       }
 
-      if (typing || s.overlayBlocksNav) {
+      if (s.overlayBlocksNav) {
         return;
       }
 

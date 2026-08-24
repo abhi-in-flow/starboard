@@ -5,6 +5,7 @@
 - Virtualizer no longer snaps back on query invalidation; ArrowDown page-advance is bound to generation + source id.
 - Detail overlay is a real Dialog; heatmap cells are noninteractive; Hide archived locks on Inactive/Forgotten.
 - Honest list/toolbar/settings semantics, pagination retry, health-trigger aggregate state, and reduced-motion charts/scroll.
+- Library ↑/↓ and `/` yield to open Selects, dialogs, and other key-owning composites.
 
 ## 0.13.0 — UI and accessibility polish
 
