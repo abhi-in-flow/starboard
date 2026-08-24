@@ -25,6 +25,7 @@ import {
   startAssignment,
   updateTaxonomy,
 } from "@/lib/tauri";
+import { usePrefersReducedMotion } from "@/lib/useMediaQuery";
 import { useUiStore } from "@/store/ui";
 import type {
   AppError,
@@ -140,6 +141,7 @@ export function CategoriesView() {
   const queryClient = useQueryClient();
   const categoriesSection = useUiStore((s) => s.categoriesSection);
   const setCategoriesSection = useUiStore((s) => s.setCategoriesSection);
+  const reduceMotion = usePrefersReducedMotion();
   const [draft, setDraft] = useState<DraftCat[] | null>(null);
   const [editorMode, setEditorMode] = useState<EditorMode>("create");
   const [progress, setProgress] = useState<CategorizeProgress | null>(null);
@@ -188,11 +190,12 @@ export function CategoriesView() {
       categoriesSection === "taxonomy"
         ? "categories-taxonomy"
         : "categories-assign";
-    document
-      .getElementById(id)
-      ?.scrollIntoView({ behavior: "smooth", block: "start" });
+    document.getElementById(id)?.scrollIntoView({
+      behavior: reduceMotion ? "auto" : "smooth",
+      block: "start",
+    });
     setCategoriesSection(null);
-  }, [categoriesSection, setCategoriesSection]);
+  }, [categoriesSection, setCategoriesSection, reduceMotion]);
 
   const generateMutation = useMutation({
     mutationFn: generateTaxonomy,

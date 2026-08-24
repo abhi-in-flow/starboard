@@ -30,6 +30,7 @@ import {
   activeFilterChips,
   type FilterChip,
   hasClearableLibraryState,
+  hideArchivedDisabled,
   removeFilterChip,
 } from "@/lib/libraryFilters";
 import { REVIEW_PRESETS, reviewPresetMeta } from "@/lib/review";
@@ -261,22 +262,18 @@ export function LibraryToolbar({
             /
           </kbd>
         </div>
-        <div
-          role="radiogroup"
-          aria-label="Search mode"
-          className="flex items-center rounded-lg border border-border p-0.5"
-        >
+        <fieldset className="m-0 flex items-center rounded-lg border border-border p-0.5">
+          <legend className="sr-only">Search mode</legend>
           {MODES.map((m) => {
             const disabled = m.id !== "keyword" && offline;
-            const checked = searchMode === m.id;
+            const pressed = searchMode === m.id;
             return (
               <Button
                 key={m.id}
                 type="button"
                 size="sm"
-                role="radio"
-                aria-checked={checked}
-                variant={checked ? "secondary" : "ghost"}
+                aria-pressed={pressed}
+                variant={pressed ? "secondary" : "ghost"}
                 className="h-8 px-2.5 text-xs"
                 disabled={disabled}
                 title={
@@ -290,7 +287,7 @@ export function LibraryToolbar({
               </Button>
             );
           })}
-        </div>
+        </fieldset>
         {sortedByRelevance ? (
           <Badge
             variant="secondary"
@@ -331,16 +328,12 @@ export function LibraryToolbar({
             </Button>
           </div>
         )}
-        <div
-          role="radiogroup"
-          aria-label="Library layout"
-          className="flex items-center rounded-lg border border-border p-0.5"
-        >
+        <fieldset className="m-0 flex items-center rounded-lg border border-border p-0.5">
+          <legend className="sr-only">Library layout</legend>
           <Button
             type="button"
             size="sm"
-            role="radio"
-            aria-checked={layout === "list"}
+            aria-pressed={layout === "list"}
             variant={layout === "list" ? "secondary" : "ghost"}
             className="h-8 px-2"
             onClick={() => setLayout("list")}
@@ -352,8 +345,7 @@ export function LibraryToolbar({
           <Button
             type="button"
             size="sm"
-            role="radio"
-            aria-checked={layout === "grid"}
+            aria-pressed={layout === "grid"}
             variant={layout === "grid" ? "secondary" : "ghost"}
             className="h-8 px-2"
             onClick={() => setLayout("grid")}
@@ -362,7 +354,7 @@ export function LibraryToolbar({
           >
             <LayoutGrid className="size-4" />
           </Button>
-        </div>
+        </fieldset>
         <span
           className="ml-auto text-xs font-medium text-foreground/70"
           aria-live="polite"
@@ -574,8 +566,11 @@ export function LibraryToolbar({
               <Checkbox
                 id="hide-archived"
                 checked={hideArchived}
-                disabled={
-                  reviewPreset === "archived" || reviewPreset === "unstarred"
+                disabled={hideArchivedDisabled(reviewPreset)}
+                title={
+                  hideArchivedDisabled(reviewPreset)
+                    ? "Locked for this review queue so the list matches the count"
+                    : undefined
                 }
                 onCheckedChange={(v) => setHideArchived(v === true)}
               />

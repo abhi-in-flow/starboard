@@ -99,10 +99,23 @@ export function applyHideUnstarred(
   return { ...state, hideUnstarred };
 }
 
+/** Inactive/Forgotten keep hideArchived on so counts cannot diverge. */
+export function hideArchivedDisabled(preset: ReviewPreset | null): boolean {
+  return (
+    preset === "inactive" ||
+    preset === "forgotten" ||
+    preset === "archived" ||
+    preset === "unstarred"
+  );
+}
+
 export function applyHideArchived(
   state: LibraryFilterState,
   hideArchived: boolean,
 ): LibraryFilterState {
+  if (state.reviewPreset === "inactive" || state.reviewPreset === "forgotten") {
+    return { ...state, hideArchived: true };
+  }
   if (hideArchived && state.reviewPreset === "archived") {
     return applyReviewPreset({ ...state, hideArchived }, null);
   }

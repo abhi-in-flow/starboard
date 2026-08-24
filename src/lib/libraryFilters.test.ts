@@ -8,6 +8,7 @@ import {
   clearedLibraryFilters,
   DEFAULT_LIBRARY_FILTERS,
   hasClearableLibraryState,
+  hideArchivedDisabled,
   type LibraryFilterState,
   removeFilterChip,
 } from "./libraryFilters";
@@ -119,6 +120,19 @@ describe("clear-all and chip visibility", () => {
     const next = applyHideArchived(archived, true);
     expect(next.reviewPreset).toBeNull();
     expect(next.hideArchived).toBe(true);
+  });
+
+  test("Inactive and Forgotten lock Hide archived on", () => {
+    expect(hideArchivedDisabled("inactive")).toBe(true);
+    expect(hideArchivedDisabled("forgotten")).toBe(true);
+    expect(hideArchivedDisabled("archived")).toBe(true);
+    expect(hideArchivedDisabled("unstarred")).toBe(true);
+    expect(hideArchivedDisabled(null)).toBe(false);
+    const locked = applyReviewPreset(
+      state({ hideArchived: false }),
+      "inactive",
+    );
+    expect(applyHideArchived(locked, false).hideArchived).toBe(true);
   });
 
   test("choosing a category leaves the Uncategorized preset", () => {

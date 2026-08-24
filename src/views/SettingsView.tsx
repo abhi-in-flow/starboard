@@ -24,6 +24,7 @@ import {
   setOnboardingCompleted,
   updateSettings,
 } from "@/lib/tauri";
+import { usePrefersReducedMotion } from "@/lib/useMediaQuery";
 import { cn } from "@/lib/utils";
 import { useUiStore } from "@/store/ui";
 import type { AppError, CategoryNode, IntegrityReport } from "@/types";
@@ -240,6 +241,7 @@ export function SettingsView() {
   const settingsSection = useUiStore((s) => s.settingsSection);
   const setSettingsSection = useUiStore((s) => s.setSettingsSection);
   const setView = useUiStore((s) => s.setView);
+  const reduceMotion = usePrefersReducedMotion();
   const [pat, setPat] = useState("");
   const [replacingToken, setReplacingToken] = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
@@ -349,7 +351,10 @@ export function SettingsView() {
     const id =
       settingsSection === "github" ? "settings-github" : "settings-ollama";
     const section = document.getElementById(id);
-    section?.scrollIntoView({ behavior: "smooth", block: "start" });
+    section?.scrollIntoView({
+      behavior: reduceMotion ? "auto" : "smooth",
+      block: "start",
+    });
     if (settingsSection === "github") {
       window.setTimeout(() => {
         document.getElementById("pat")?.focus();
@@ -360,7 +365,7 @@ export function SettingsView() {
       }, 80);
     }
     setSettingsSection(null);
-  }, [settingsSection, setSettingsSection]);
+  }, [settingsSection, setSettingsSection, reduceMotion]);
 
   const auth = authQuery.data;
   const showPatForm = !auth?.connected || replacingToken;
@@ -375,16 +380,12 @@ export function SettingsView() {
         </p>
       </div>
 
-      <div
-        role="tablist"
-        aria-label="Settings sections"
-        className="flex w-fit items-center rounded-lg border border-border p-0.5"
-      >
+      <fieldset className="m-0 flex w-fit items-center rounded-lg border border-border p-0.5">
+        <legend className="sr-only">Settings sections</legend>
         <Button
           type="button"
           size="sm"
-          role="tab"
-          aria-selected={tab === "general"}
+          aria-pressed={tab === "general"}
           variant={tab === "general" ? "secondary" : "ghost"}
           className={cn("h-8 px-3 text-xs")}
           onClick={() => setTab("general")}
@@ -394,8 +395,7 @@ export function SettingsView() {
         <Button
           type="button"
           size="sm"
-          role="tab"
-          aria-selected={tab === "status"}
+          aria-pressed={tab === "status"}
           variant={tab === "status" ? "secondary" : "ghost"}
           className={cn("h-8 px-3 text-xs")}
           onClick={() => {
@@ -405,7 +405,7 @@ export function SettingsView() {
         >
           Status
         </Button>
-      </div>
+      </fieldset>
 
       {tab === "status" ? (
         <StatusTab />

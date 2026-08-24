@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import type { CategoryNode } from "../types";
 import { resolveCategoryId } from "./categories";
-import { deriveHealthItems } from "./health";
+import { deriveHealthItems, healthTriggerLabel } from "./health";
 import { nextEscapeAction } from "./keyboard";
 
 describe("deriveHealthItems", () => {
@@ -45,6 +45,26 @@ describe("deriveHealthItems", () => {
       section: "taxonomy",
     });
     expect(items).toHaveLength(6);
+  });
+
+  test("health trigger announces aggregate warning and error state", () => {
+    const troubled = deriveHealthItems({
+      githubConnected: false,
+      pendingReadmes: 3,
+      ollamaAvailable: false,
+      ollamaConfigured: true,
+    });
+    expect(healthTriggerLabel(troubled)).toMatch(/error/i);
+    expect(healthTriggerLabel(troubled)).toContain("GitHub");
+    const clear = deriveHealthItems({
+      githubConnected: true,
+      lastSyncedAt: "2026-01-01T00:00:00Z",
+      ollamaAvailable: true,
+      embeddingCoverage: 1,
+      assignmentCoverage: 1,
+      categoryCount: 2,
+    });
+    expect(healthTriggerLabel(clear)).toBe("Library health: all clear");
   });
 });
 

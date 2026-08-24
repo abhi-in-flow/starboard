@@ -9,6 +9,7 @@ import {
   deriveHealthItems,
   type HealthItem,
   type HealthTarget,
+  healthTriggerLabel,
 } from "@/lib/health";
 import {
   getAuthStatus,
@@ -95,7 +96,7 @@ export function HealthStrip() {
             type="button"
             variant="ghost"
             className="h-auto w-full justify-between px-2 py-2 text-left"
-            aria-label="Library health"
+            aria-label={healthTriggerLabel(items)}
           >
             <span className="text-xs font-medium">Status</span>
             <span className="flex items-center gap-1" aria-hidden="true">

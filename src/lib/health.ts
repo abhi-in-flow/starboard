@@ -149,3 +149,20 @@ export function deriveHealthItems(input: HealthInput): HealthItem[] {
 
   return [github, sync, readme, ollama, embeddings, categories];
 }
+
+export function healthTriggerLabel(items: HealthItem[]): string {
+  const errors = items.filter((item) => item.tone === "error");
+  const warnings = items.filter((item) => item.tone === "warn");
+  if (errors.length === 0 && warnings.length === 0) {
+    return "Library health: all clear";
+  }
+  const notable = [...errors, ...warnings]
+    .map((item) => `${item.label} ${item.value}`)
+    .join("; ");
+  if (errors.length > 0) {
+    const n = errors.length;
+    return `Library health: ${n} error${n === 1 ? "" : "s"}. ${notable}`;
+  }
+  const n = warnings.length;
+  return `Library health: ${n} warning${n === 1 ? "" : "s"}. ${notable}`;
+}

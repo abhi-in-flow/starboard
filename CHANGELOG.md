@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.13.1 — Accessibility and list-interaction corrections
+
+- Virtualizer no longer snaps back on query invalidation; ArrowDown page-advance is bound to generation + source id.
+- Detail overlay is a real Dialog; heatmap cells are noninteractive; Hide archived locks on Inactive/Forgotten.
+- Honest list/toolbar/settings semantics, pagination retry, health-trigger aggregate state, and reduced-motion charts/scroll.
+
 ## 0.13.0 — UI and accessibility polish
 
 - Contextual empty states, library toolbar hierarchy, named filter chips, sort direction, and search mode-used fallback.

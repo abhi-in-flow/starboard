@@ -46,6 +46,7 @@ import {
   listCategories,
   writeLibraryExport,
 } from "@/lib/tauri";
+import { usePrefersReducedMotion } from "@/lib/useMediaQuery";
 import { cn } from "@/lib/utils";
 import { useUiStore } from "@/store/ui";
 import type {
@@ -162,10 +163,20 @@ function RhythmHeatmap({ cells }: { cells: HeatmapCell[] }) {
     return <EmptyHint>No starring activity in this range.</EmptyHint>;
   }
 
+  const summary = heatmapSummary(cells);
   return (
-    <div className="overflow-x-auto">
-      <p className="sr-only">{heatmapSummary(cells)}</p>
-      <div className="inline-grid min-w-full grid-cols-[auto_repeat(24,minmax(0.75rem,1fr))] gap-0.5">
+    <div
+      className="overflow-x-auto"
+      role="img"
+      aria-labelledby="insights-heatmap-summary"
+    >
+      <p id="insights-heatmap-summary" className="sr-only">
+        {summary}
+      </p>
+      <div
+        className="inline-grid min-w-full grid-cols-[auto_repeat(24,minmax(0.75rem,1fr))] gap-0.5"
+        aria-hidden
+      >
         <div />
         {HOURS.map((hour) => (
           <div
@@ -184,12 +195,11 @@ function RhythmHeatmap({ cells }: { cells: HeatmapCell[] }) {
               const count = lookup.get(`${dayIndex}-${hour}`) ?? 0;
               const name = heatmapAriaLabel(label, hour, count);
               return (
-                <button
+                <div
                   key={`${label}-${hour}`}
-                  type="button"
                   title={name}
-                  aria-label={name}
-                  className="aspect-square rounded-[2px] border border-transparent focus-visible:ring-2 focus-visible:ring-ring"
+                  aria-hidden
+                  className="aspect-square rounded-[2px] border border-transparent"
                   style={{ background: heatmapColor(count, max) }}
                 />
               );
@@ -208,6 +218,7 @@ function StackedShareChart({
   points: SharePoint[];
   onBandClick?: (name: string) => void;
 }) {
+  const reduceMotion = usePrefersReducedMotion();
   const { data, keys } = useMemo(() => pivotSharePoints(points), [points]);
   if (data.length === 0) {
     return <EmptyHint>Not enough categorized history to chart.</EmptyHint>;
@@ -249,6 +260,7 @@ function StackedShareChart({
               stroke={CHART_COLORS[i % CHART_COLORS.length]}
               fill={CHART_COLORS[i % CHART_COLORS.length]}
               fillOpacity={0.75}
+              isAnimationActive={!reduceMotion}
               style={{ cursor: onBandClick ? "pointer" : undefined }}
               onClick={() => onBandClick?.(key)}
             />
@@ -415,6 +427,7 @@ export function InsightsView() {
   const openLibraryReview = useUiStore((s) => s.openLibraryReview);
   const openLibraryCategory = useUiStore((s) => s.openLibraryCategory);
   const openLibraryLanguage = useUiStore((s) => s.openLibraryLanguage);
+  const reduceMotion = usePrefersReducedMotion();
 
   const range: InsightsDateRange = useMemo(() => {
     if (preset === "custom") {
@@ -720,6 +733,7 @@ export function InsightsView() {
                       stroke="#0f766e"
                       strokeWidth={2}
                       dot={false}
+                      isAnimationActive={!reduceMotion}
                     />
                   </LineChart>
                 </ResponsiveContainer>
