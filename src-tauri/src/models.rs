@@ -574,3 +574,25 @@ pub struct CategorizationPanel {
     pub auto_categorize_after_sync: bool,
     pub categories: Vec<CategoryNode>,
 }
+
+/// First-run checklist snapshot. Local DB + keyring truth only (no Ollama HTTP).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SetupStatus {
+    pub github_connected: bool,
+    pub github_username: Option<String>,
+    pub last_synced_at: Option<String>,
+    pub repo_count: i64,
+    pub ollama_base_url: String,
+    pub ollama_chat_model: String,
+    /// Base URL set and chat model non-empty. Live reachability is `get_ollama_status`.
+    pub ollama_configured: bool,
+    pub category_count: i64,
+    pub categorized_repos: i64,
+    /// categorized_repos / repo_count, or 0 when empty.
+    pub assignment_coverage: f64,
+    pub embedded_repos: i64,
+    /// embedded_repos / repo_count, or 0 when empty.
+    pub embedding_coverage: f64,
+    pub onboarding_completed: bool,
+}

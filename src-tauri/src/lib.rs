@@ -9,7 +9,7 @@ pub use services::sanitize::is_safe_markdown_url;
 
 use tauri::Manager;
 
-use commands::{auth, categorize, embed, insights, repos, settings, status, sync};
+use commands::{auth, categorize, embed, insights, repos, settings, setup, status, sync};
 use services::categorizer::CategorizeState;
 use services::embed::EmbedState;
 use services::store::{self, DbState};
@@ -71,6 +71,8 @@ pub fn run() {
             insights::write_library_export,
             status::get_system_status,
             status::check_db_integrity,
+            setup::get_setup_status,
+            setup::set_onboarding_completed,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

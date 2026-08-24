@@ -17,6 +17,7 @@ import type {
   RepoFilters,
   RepoListResult,
   SearchReposRequest,
+  SetupStatus,
   SharePoint,
   SyncResult,
   SyncStatus,
@@ -178,4 +179,12 @@ export function getSystemStatus() {
 
 export function checkDbIntegrity() {
   return invoke<IntegrityReport>("check_db_integrity");
+}
+
+export function getSetupStatus() {
+  return invoke<SetupStatus>("get_setup_status");
+}
+
+export function setOnboardingCompleted(completed: boolean) {
+  return invoke<SetupStatus>("set_onboarding_completed", { completed });
 }

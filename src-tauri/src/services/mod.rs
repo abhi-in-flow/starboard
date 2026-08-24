@@ -13,6 +13,7 @@ pub mod sanitize;
 pub mod search;
 pub mod secrets;
 pub mod settings;
+pub mod setup;
 pub mod status;
 pub mod store;
 pub mod sync;
