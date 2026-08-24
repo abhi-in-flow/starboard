@@ -10,7 +10,7 @@ use tauri::{AppHandle, Emitter, Manager};
 use crate::error::{AppError, AppResult};
 use crate::models::{CategorizeProgress, TaxonomyDraft, TaxonomyEdit, TaxonomyNodeEdit};
 use crate::services::github::truncate_utf8;
-use crate::services::jobs::CancelFlag;
+use crate::services::jobs::{CancelFlag, RunningFlagGuard};
 use crate::services::ollama::OllamaClient;
 use crate::services::settings;
 use crate::services::store::{self, DbState};
@@ -732,15 +732,16 @@ pub async fn run_assignment(app: AppHandle) -> AppResult<()> {
     if let Ok(mut last_error) = state.last_error.lock() {
         *last_error = None;
     }
+    let _running = RunningFlagGuard::holding(&state.running);
 
     let result = run_assignment_inner(&app).await;
-
     if let Err(e) = &result {
-        if let Ok(mut last_error) = state.last_error.lock() {
-            *last_error = Some(e.message.clone());
+        if !e.is_cancelled() {
+            if let Ok(mut last_error) = state.last_error.lock() {
+                *last_error = Some(e.message.clone());
+            }
         }
     }
-    state.running.store(false, Ordering::SeqCst);
     result
 }
 

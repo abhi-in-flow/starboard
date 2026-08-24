@@ -8,7 +8,7 @@ use time::OffsetDateTime;
 
 use crate::error::{AppError, AppResult};
 use crate::models::{EmbedProgress, EmbedStatus};
-use crate::services::jobs::CancelFlag;
+use crate::services::jobs::{CancelFlag, RunningFlagGuard};
 use crate::services::ollama::OllamaClient;
 use crate::services::settings;
 use crate::services::store::{self, DbState};
@@ -420,13 +420,14 @@ pub async fn run_embed_pipeline(app: AppHandle) -> AppResult<()> {
     if let Ok(mut guard) = embed_state.last_error.lock() {
         *guard = None;
     }
+    let _running = RunningFlagGuard::holding(&embed_state.running);
 
     let result = run_embed_pipeline_inner(&app).await;
-
-    embed_state.running.store(false, Ordering::SeqCst);
     if let Err(ref e) = result {
-        if let Ok(mut guard) = embed_state.last_error.lock() {
-            *guard = Some(e.message.clone());
+        if !e.is_cancelled() {
+            if let Ok(mut guard) = embed_state.last_error.lock() {
+                *guard = Some(e.message.clone());
+            }
         }
     }
     result

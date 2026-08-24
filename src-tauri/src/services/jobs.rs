@@ -1,11 +1,20 @@
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 
 use crate::error::{AppError, AppResult};
 
 /// Cooperative cancellation flag shared by long-running jobs.
-#[derive(Debug, Default)]
+#[derive(Debug, Clone)]
 pub struct CancelFlag {
-    cancelled: AtomicBool,
+    cancelled: Arc<AtomicBool>,
+}
+
+impl Default for CancelFlag {
+    fn default() -> Self {
+        Self {
+            cancelled: Arc::new(AtomicBool::new(false)),
+        }
+    }
 }
 
 impl CancelFlag {
@@ -30,6 +39,24 @@ impl CancelFlag {
     }
 }
 
+/// Clears an in-memory running flag on drop, including panic/unwind.
+pub struct RunningFlagGuard<'a> {
+    flag: &'a AtomicBool,
+}
+
+impl<'a> RunningFlagGuard<'a> {
+    /// Caller must have already set `flag` to true (e.g. via compare_exchange).
+    pub fn holding(flag: &'a AtomicBool) -> Self {
+        Self { flag }
+    }
+}
+
+impl Drop for RunningFlagGuard<'_> {
+    fn drop(&mut self) {
+        self.flag.store(false, Ordering::SeqCst);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -46,5 +73,29 @@ mod tests {
         flag.reset();
         assert!(!flag.is_cancelled());
         flag.check().expect("reset");
+    }
+
+    #[test]
+    fn running_guard_clears_flag_on_drop() {
+        let flag = AtomicBool::new(true);
+        {
+            let _guard = RunningFlagGuard::holding(&flag);
+            assert!(flag.load(Ordering::SeqCst));
+        }
+        assert!(!flag.load(Ordering::SeqCst));
+    }
+
+    #[test]
+    fn running_guard_clears_flag_on_unwind() {
+        let flag = AtomicBool::new(true);
+        let panicked = std::panic::catch_unwind(|| {
+            let _guard = RunningFlagGuard::holding(&flag);
+            panic!("boom");
+        });
+        assert!(panicked.is_err());
+        assert!(
+            !flag.load(Ordering::SeqCst),
+            "running flag must reset after unwind"
+        );
     }
 }

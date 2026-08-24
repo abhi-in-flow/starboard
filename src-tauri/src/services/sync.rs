@@ -11,7 +11,7 @@ use tokio::sync::Mutex;
 use crate::error::{AppError, AppResult};
 use crate::models::{StarredRepo, SyncProgress, SyncResult, SyncStatus};
 use crate::services::github::{GitHubClient, ReadmeFetch};
-use crate::services::jobs::CancelFlag;
+use crate::services::jobs::{CancelFlag, RunningFlagGuard};
 use crate::services::settings::{
     self, KEY_INCREMENTAL_SINCE_RECONCILE, KEY_LAST_FULL_RECONCILE_AT, KEY_LAST_SYNCED_AT,
     KEY_STARRED_ETAG,
@@ -170,10 +170,9 @@ pub async fn run_sync(app: AppHandle, full: bool) -> AppResult<SyncResult> {
         return Err(AppError::sync("a sync is already running"));
     }
     sync_state.cancel_sync.reset();
+    let _guard = RunningFlagGuard::holding(&sync_state.running);
 
-    let result = run_sync_inner(&app, full).await;
-    sync_state.running.store(false, Ordering::SeqCst);
-    result
+    run_sync_inner(&app, full).await
 }
 
 async fn run_sync_inner(app: &AppHandle, full: bool) -> AppResult<SyncResult> {
@@ -306,8 +305,8 @@ pub fn spawn_readme_queue_if_needed(app: AppHandle) {
     sync_state.cancel_readme.reset();
 
     tauri::async_runtime::spawn(async move {
-        // Clears readme_running even if the task panics.
-        let _guard = ReadmeRunningGuard(app.clone());
+        let state = app.state::<SyncState>();
+        let _guard = RunningFlagGuard::holding(&state.readme_running);
         match run_readme_queue_task(app.clone()).await {
             Ok(_) => {
                 crate::services::embed::spawn_embed_pipeline_if_needed(app.clone());
@@ -326,17 +325,6 @@ pub fn spawn_readme_queue_if_needed(app: AppHandle) {
             }
         }
     });
-}
-
-struct ReadmeRunningGuard(AppHandle);
-
-impl Drop for ReadmeRunningGuard {
-    fn drop(&mut self) {
-        self.0
-            .state::<SyncState>()
-            .readme_running
-            .store(false, Ordering::SeqCst);
-    }
 }
 
 async fn run_readme_queue_task(app: AppHandle) -> AppResult<i64> {
@@ -639,6 +627,15 @@ fn upsert_repo(conn: &Connection, repo: &StarredRepo) -> AppResult<UpsertKind> {
     })
 }
 
+/// README retry policy:
+///
+/// - One sweep per queue invocation: snapshot eligible IDs at start; each ID is
+///   fetched at most once in this run (no busy reload of `retryable` rows).
+/// - 404 → `readme_status=missing`, empty excerpt, never retried.
+/// - Transient/5xx/network → `retryable`, excerpt stays NULL; `readme_attempts`
+///   increments for diagnostics. Eligible for a later Resume/launch. There is
+///   **no** max-attempts cutoff that would permanently strand a row.
+/// - Rate limit → pause the job (resumable); remaining snapshot IDs stay pending.
 fn pending_readme_sql() -> &'static str {
     "unstarred = 0 AND (readme_excerpt IS NULL OR readme_status = 'retryable')"
 }
@@ -681,12 +678,9 @@ async fn fetch_readme_queue(app: &AppHandle, client: &GitHubClient) -> AppResult
     let log_id = with_db(app, |conn| begin_sync_log(conn, "readme", &started))?;
     let mut total_fetched = 0i64;
 
-    loop {
-        let pending = with_db(app, load_pending_readmes)?;
-        if pending.is_empty() {
-            break;
-        }
-
+    // Snapshot once — do not reload `retryable` rows in this job.
+    let pending = with_db(app, load_pending_readmes)?;
+    if !pending.is_empty() {
         let batch_total = pending.len() as u32;
         emit_progress(
             app,
@@ -699,7 +693,9 @@ async fn fetch_readme_queue(app: &AppHandle, client: &GitHubClient) -> AppResult
             ),
         );
 
-        match fetch_readme_batch(app, client, pending).await {
+        let db = &app.state::<DbState>().0;
+        let cancel = app.state::<SyncState>().cancel_readme.clone();
+        match fetch_readme_batch(db, client, pending, &cancel, Some(app)).await {
             Ok(n) => total_fetched += n,
             Err(e) => {
                 let finished = now_rfc3339();
@@ -767,9 +763,11 @@ fn is_rate_limit_error(err: &AppError) -> bool {
 }
 
 async fn fetch_readme_batch(
-    app: &AppHandle,
+    conn: &std::sync::Mutex<Connection>,
     client: &GitHubClient,
     pending: Vec<(i64, String, String)>,
+    cancel: &CancelFlag,
+    app: Option<&AppHandle>,
 ) -> AppResult<i64> {
     let total = pending.len() as u32;
     let completed = AtomicU32::new(0);
@@ -785,7 +783,8 @@ async fn fetch_readme_batch(
     stream::iter(pending)
         .for_each_concurrent(README_CONCURRENCY, |(id, owner, name)| {
             let client = client.clone();
-            let app = app.clone();
+            let app = app.cloned();
+            let cancel = cancel.clone();
             let completed = &completed;
             let fetched = &fetched;
             let stop = &stop;
@@ -796,7 +795,7 @@ async fn fetch_readme_batch(
                 if stop.load(Ordering::SeqCst) {
                     return;
                 }
-                if app.state::<SyncState>().cancel_readme.is_cancelled() {
+                if cancel.is_cancelled() {
                     stop.store(true, Ordering::SeqCst);
                     let mut slot = pause_error.lock().await;
                     if slot.is_none() {
@@ -810,7 +809,7 @@ async fn fetch_readme_batch(
                 if stop.load(Ordering::SeqCst) {
                     return;
                 }
-                if app.state::<SyncState>().cancel_readme.is_cancelled() {
+                if cancel.is_cancelled() {
                     stop.store(true, Ordering::SeqCst);
                     let mut slot = pause_error.lock().await;
                     if slot.is_none() {
@@ -835,7 +834,7 @@ async fn fetch_readme_batch(
                     }
                     Err(e) => {
                         if let Err(db_err) =
-                            with_db(&app, |conn| mark_readme_retryable(conn, id, &e.message))
+                            with_mutex_db(conn, |db| mark_readme_retryable(db, id, &e.message))
                         {
                             stop.store(true, Ordering::SeqCst);
                             let mut slot = pause_error.lock().await;
@@ -844,18 +843,20 @@ async fn fetch_readme_batch(
                             }
                         } else {
                             let current = completed.fetch_add(1, Ordering::SeqCst) + 1;
-                            emit_progress(
-                                &app,
-                                progress(
-                                    "readme",
-                                    current,
-                                    total,
-                                    format!(
-                                        "README {current}/{total}: {owner}/{name} (retry later)"
+                            if let Some(app) = app.as_ref() {
+                                emit_progress(
+                                    app,
+                                    progress(
+                                        "readme",
+                                        current,
+                                        total,
+                                        format!(
+                                            "README {current}/{total}: {owner}/{name} (retry later)"
+                                        ),
+                                        None,
                                     ),
-                                    None,
-                                ),
-                            );
+                                );
+                            }
                         }
                         return;
                     }
@@ -865,9 +866,9 @@ async fn fetch_readme_batch(
                     return;
                 };
 
-                if let Err(e) = with_db(&app, |conn| {
-                    store_readme_excerpt(conn, id, &excerpt, status)
-                }) {
+                if let Err(e) =
+                    with_mutex_db(conn, |db| store_readme_excerpt(db, id, &excerpt, status))
+                {
                     // DB errors are local — pause so we don't lose the queue.
                     stop.store(true, Ordering::SeqCst);
                     let mut slot = pause_error.lock().await;
@@ -884,7 +885,9 @@ async fn fetch_readme_batch(
                 } else {
                     format!("README {current}/{total}: {owner}/{name}")
                 };
-                emit_progress(&app, progress("readme", current, total, note, None));
+                if let Some(app) = app.as_ref() {
+                    emit_progress(app, progress("readme", current, total, note, None));
+                }
             }
         })
         .await;
@@ -917,6 +920,7 @@ fn store_readme_excerpt(
         "UPDATE repos SET
             readme_excerpt = ?1,
             readme_status = ?2,
+            readme_attempts = COALESCE(readme_attempts, 0) + 1,
             readme_last_error = NULL,
             document_hash = ?3
          WHERE id = ?4",
@@ -1000,8 +1004,14 @@ where
     F: FnOnce(&Connection) -> AppResult<T>,
 {
     let state = app.state::<DbState>();
-    let conn = state
-        .0
+    with_mutex_db(&state.0, f)
+}
+
+fn with_mutex_db<T, F>(conn: &std::sync::Mutex<Connection>, f: F) -> AppResult<T>
+where
+    F: FnOnce(&Connection) -> AppResult<T>,
+{
+    let conn = conn
         .lock()
         .map_err(|_| AppError::db("database lock poisoned"))?;
     f(&conn)
@@ -1198,6 +1208,92 @@ mod tests {
         assert!(reconcile_due(&conn).expect("due"));
         settings::set_value(&conn, KEY_INCREMENTAL_SINCE_RECONCILE, "1").expect("n");
         assert!(!reconcile_due(&conn).expect("not due"));
+    }
+
+    /// One-sweep helper: snapshot pending rows once and fetch each at most once.
+    async fn run_readme_sweep_for_test(
+        conn: &std::sync::Mutex<Connection>,
+        client: &GitHubClient,
+        cancel: &CancelFlag,
+    ) -> AppResult<i64> {
+        let pending = with_mutex_db(conn, load_pending_readmes)?;
+        fetch_readme_batch(conn, client, pending, cancel, None).await
+    }
+
+    #[tokio::test]
+    async fn readme_queue_attempts_retryable_row_once_per_sweep() {
+        use crate::services::github::GitHubClient;
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/repos/owner/flaky/readme"))
+            .respond_with(ResponseTemplate::new(503).set_body_json(serde_json::json!({
+                "message": "unavailable"
+            })))
+            .mount(&server)
+            .await;
+
+        let conn = std::sync::Mutex::new(test_conn());
+        with_mutex_db(&conn, |db| {
+            apply_full_diff(db, &[sample_repo(1, "flaky", "2024-01-01T00:00:00Z")])
+        })
+        .expect("seed");
+
+        let client = GitHubClient::new("test-token", server.uri()).expect("client");
+        let cancel = CancelFlag::default();
+        let running = std::sync::atomic::AtomicBool::new(true);
+        let fetched = {
+            let _guard = RunningFlagGuard::holding(&running);
+            run_readme_sweep_for_test(&conn, &client, &cancel)
+                .await
+                .expect("sweep")
+        };
+        assert_eq!(fetched, 0, "503 must not store an excerpt");
+        assert!(
+            !running.load(std::sync::atomic::Ordering::SeqCst),
+            "job must drain and reset the running flag"
+        );
+
+        let first_hits = server.received_requests().await.expect("reqs").len();
+        assert_eq!(first_hits, 1, "one-sweep must fetch a 503 row only once");
+
+        let (status, attempts): (String, i64) = with_mutex_db(&conn, |db| {
+            Ok(db
+                .query_row(
+                    "SELECT readme_status, readme_attempts FROM repos WHERE id = 1",
+                    [],
+                    |r| Ok((r.get(0)?, r.get(1)?)),
+                )
+                .expect("row"))
+        })
+        .expect("status");
+        assert_eq!(status, "retryable");
+        assert_eq!(attempts, 1);
+        assert_eq!(
+            with_mutex_db(&conn, count_pending_readmes).expect("pending"),
+            1
+        );
+
+        let fetched_again = run_readme_sweep_for_test(&conn, &client, &cancel)
+            .await
+            .expect("resume");
+        assert_eq!(fetched_again, 0);
+        let second_hits = server.received_requests().await.expect("reqs").len();
+        assert_eq!(
+            second_hits, 2,
+            "a later invocation must be allowed to retry the same row"
+        );
+        let attempts2: i64 = with_mutex_db(&conn, |db| {
+            Ok(db
+                .query_row("SELECT readme_attempts FROM repos WHERE id = 1", [], |r| {
+                    r.get(0)
+                })
+                .expect("attempts"))
+        })
+        .expect("attempts");
+        assert_eq!(attempts2, 2);
     }
 
     #[test]
