@@ -13,6 +13,7 @@ pub struct DbState(pub Mutex<Connection>);
 const MIGRATION_001: &str = include_str!("../../migrations/001_init.sql");
 const MIGRATION_002: &str = include_str!("../../migrations/002_embeddings.sql");
 const MIGRATION_003: &str = include_str!("../../migrations/003_hardening.sql");
+const MIGRATION_004: &str = include_str!("../../migrations/004_stale_review.sql");
 
 /// Desktop local-first durability:
 /// - `foreign_keys=ON` enforces referential integrity
@@ -65,6 +66,7 @@ pub fn open_and_migrate(db_path: &PathBuf) -> AppResult<Connection> {
         M::up(MIGRATION_001),
         M::up(MIGRATION_002),
         M::up(MIGRATION_003),
+        M::up(MIGRATION_004),
     ]);
     migrations.to_latest(&mut conn)?;
 
@@ -288,6 +290,7 @@ mod tests {
             "repos_au",
             "repo_embedding_meta",
             "repo_embeddings",
+            "repo_review",
         ] {
             assert!(
                 tables.iter().any(|t| t == expected),
@@ -500,6 +503,82 @@ mod tests {
             .expect("attempts col");
         assert_eq!(has_status, 1);
         assert_eq!(has_attempts, 1);
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn migration_004_upgrades_phase5_db() {
+        register_sqlite_vec();
+        let path = temp_db_path("upgrade004");
+        {
+            let mut conn = Connection::open(&path).expect("open");
+            conn.execute_batch("PRAGMA foreign_keys = ON;")
+                .expect("pragma");
+            Migrations::new(vec![M::up(MIGRATION_001), M::up(MIGRATION_002)])
+                .to_latest(&mut conn)
+                .expect("001+002 only");
+
+            let has_review: i64 = conn
+                .query_row(
+                    "SELECT COUNT(*) FROM sqlite_master WHERE name = 'repo_review'",
+                    [],
+                    |row| row.get(0),
+                )
+                .expect("check");
+            assert_eq!(
+                has_review, 0,
+                "previous-phase DB must not have repo_review yet"
+            );
+
+            conn.execute(
+                "INSERT INTO repos (id, full_name, owner, name, html_url, starred_at, fetched_at)
+                 VALUES (1, 'owner/kept', 'owner', 'kept', 'https://github.com/owner/kept',
+                         '2024-01-01T00:00:00Z', '2024-01-01T00:00:00Z')",
+                [],
+            )
+            .expect("seed repo");
+        }
+
+        let conn = open_and_migrate(&path).expect("upgrade");
+        let has_review: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE name = 'repo_review'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("check review");
+        assert_eq!(has_review, 1);
+
+        let cols: Vec<String> = {
+            let mut stmt = conn
+                .prepare("PRAGMA table_info(repo_review)")
+                .expect("pragma");
+            stmt.query_map([], |row| row.get::<_, String>(1))
+                .expect("query")
+                .filter_map(Result::ok)
+                .collect()
+        };
+        for expected in ["repo_id", "reviewed_at", "snoozed_until"] {
+            assert!(
+                cols.iter().any(|c| c == expected),
+                "missing repo_review column {expected}: {cols:?}"
+            );
+        }
+
+        let kept: i64 = conn
+            .query_row("SELECT COUNT(*) FROM repos WHERE id = 1", [], |row| {
+                row.get(0)
+            })
+            .expect("kept");
+        assert_eq!(kept, 1, "upgrade must preserve existing repos");
+
+        conn.execute(
+            "INSERT INTO repo_review (repo_id, reviewed_at, snoozed_until)
+             VALUES (1, '2026-08-01T00:00:00Z', NULL)",
+            [],
+        )
+        .expect("insert review row on upgraded db");
+
         let _ = std::fs::remove_file(path);
     }
 
