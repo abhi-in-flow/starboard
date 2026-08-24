@@ -6,7 +6,8 @@ import { RepoDetailPanel } from "@/components/library/RepoDetailPanel";
 import { RepoVirtualList } from "@/components/library/RepoVirtualList";
 import { OnboardingGuide } from "@/components/OnboardingGuide";
 import { onboardingSurface } from "@/lib/onboarding";
-import { getSetupStatus, listRepos, searchRepos } from "@/lib/tauri";
+import { isYoungLibrary, reviewPresetMeta } from "@/lib/review";
+import { getReviewCounts, getSetupStatus, listRepos, searchRepos } from "@/lib/tauri";
 import { useUiStore } from "@/store/ui";
 import type { RepoFilters, RepoListResult } from "@/types";
 
@@ -36,6 +37,8 @@ export function LibraryView() {
   const language = useUiStore((s) => s.language);
   const topic = useUiStore((s) => s.topic);
   const categoryId = useUiStore((s) => s.categoryId);
+  const reviewPreset = useUiStore((s) => s.reviewPreset);
+  const setReviewPreset = useUiStore((s) => s.setReviewPreset);
   const selectedRepoId = useUiStore((s) => s.selectedRepoId);
   const setSelectedRepoId = useUiStore((s) => s.setSelectedRepoId);
   const setQuery = useUiStore((s) => s.setQuery);
@@ -58,8 +61,9 @@ export function LibraryView() {
       language,
       topic,
       categoryId,
+      reviewPreset,
     }),
-    [hideUnstarred, hideArchived, language, topic, categoryId],
+    [hideUnstarred, hideArchived, language, topic, categoryId, reviewPreset],
   );
 
   const reposQuery = useInfiniteQuery({
@@ -108,6 +112,49 @@ export function LibraryView() {
   const total = reposQuery.data?.pages[0]?.total ?? 0;
   const searchHint = reposQuery.data?.pages[0]?.hint ?? null;
 
+  const reviewCounts = useQuery({
+    queryKey: ["reviewCounts"],
+    queryFn: getReviewCounts,
+  });
+
+  const extraFilters =
+    language != null || topic != null || categoryId != null;
+  const emptyMessage = useMemo(() => {
+    if (total > 0) {
+      return null;
+    }
+    const counts = reviewCounts.data;
+    if (!reviewPreset) {
+      return extraFilters || deferredQuery.trim()
+        ? "No repositories match your filters."
+        : "No repositories yet. Sync your GitHub stars to fill the library.";
+    }
+    const meta = reviewPresetMeta(reviewPreset);
+    if (!counts || counts.activeStars === 0) {
+      return "Sync your starred repos first — there is nothing local to review yet. Review never writes stars back to GitHub.";
+    }
+    if (
+      (reviewPreset === "inactive" || reviewPreset === "forgotten") &&
+      isYoungLibrary(
+        counts.activeStars,
+        counts.oldestStarredAt,
+        counts.inactive,
+        counts.forgotten,
+      ) &&
+      !extraFilters &&
+      !deferredQuery.trim()
+    ) {
+      return `Your library is still young. Inactive (no push in 12+ months) and forgotten (starred 24+ months ago, no push in 18+ months) queues fill as repos age.`;
+    }
+    if (extraFilters || deferredQuery.trim()) {
+      return `No repositories match ${meta.label} plus your current search or filters.`;
+    }
+    if (reviewPreset === "unstarred") {
+      return "No previously unstarred repos in local history yet. Unstars are recorded on sync and stay out of active counts.";
+    }
+    return `You're caught up on ${meta.label}. Reviewed and snoozed repos stay out of this queue.`;
+  }, [total, reviewPreset, reviewCounts.data, extraFilters, deferredQuery]);
+
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
       const target = e.target as HTMLElement | null;
@@ -130,6 +177,10 @@ export function LibraryView() {
         }
         if (query) {
           setQuery("");
+          return;
+        }
+        if (reviewPreset) {
+          setReviewPreset(null);
           return;
         }
         clearFilters();
@@ -171,6 +222,8 @@ export function LibraryView() {
     setSelectedRepoId,
     query,
     setQuery,
+    reviewPreset,
+    setReviewPreset,
     clearFilters,
     reposQuery,
   ]);
@@ -211,6 +264,8 @@ export function LibraryView() {
                 layout={layout}
                 selectedId={selectedRepoId}
                 onSelect={setSelectedRepoId}
+                emptyMessage={emptyMessage}
+                reviewMode={reviewPreset != null}
                 onEndReached={() => {
                   if (
                     reposQuery.hasNextPage &&

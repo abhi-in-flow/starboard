@@ -1,10 +1,22 @@
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { useVirtualizer } from "@tanstack/react-virtual";
-import { Star } from "lucide-react";
+import { openUrl } from "@tauri-apps/plugin-opener";
+import { ExternalLink, Star } from "lucide-react";
 import { useEffect, useRef } from "react";
 import { REPO_DND_TYPE } from "@/components/library/CategoryTree";
 import { RepoAvatar } from "@/components/library/RepoAvatar";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { formatCount, formatRelative, languageColor } from "@/lib/format";
+import { SNOOZE_OPTIONS } from "@/lib/review";
+import { setRepoReview } from "@/lib/tauri";
 import { cn } from "@/lib/utils";
 import type { LibraryLayout } from "@/store/ui";
 import type { RepoSummary } from "@/types";
@@ -15,6 +27,8 @@ type Props = {
   selectedId: number | null;
   onSelect: (id: number) => void;
   onEndReached?: () => void;
+  emptyMessage?: string | null;
+  reviewMode?: boolean;
 };
 
 function repoNameParts(fullName: string): { owner: string; name: string } {
@@ -28,16 +42,89 @@ function repoNameParts(fullName: string): { owner: string; name: string } {
   };
 }
 
+function ReviewActions({
+  repoId,
+  htmlUrl,
+}: {
+  repoId: number;
+  htmlUrl?: string;
+}) {
+  const queryClient = useQueryClient();
+  const mutation = useMutation({
+    mutationFn: setRepoReview,
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["repos"] });
+      void queryClient.invalidateQueries({ queryKey: ["repo"] });
+      void queryClient.invalidateQueries({ queryKey: ["reviewCounts"] });
+      void queryClient.invalidateQueries({ queryKey: ["facets"] });
+    },
+  });
+
+  return (
+    <div
+      className="flex flex-wrap items-center gap-1"
+      onClick={(e) => e.stopPropagation()}
+      onKeyDown={(e) => e.stopPropagation()}
+    >
+      {htmlUrl ? (
+        <Button
+          type="button"
+          size="sm"
+          variant="ghost"
+          className="h-7 px-2 text-[11px]"
+          onClick={() => void openUrl(htmlUrl)}
+        >
+          <ExternalLink className="size-3" />
+          GitHub
+        </Button>
+      ) : null}
+      <Button
+        type="button"
+        size="sm"
+        variant="outline"
+        className="h-7 px-2 text-[11px]"
+        disabled={mutation.isPending}
+        onClick={() =>
+          mutation.mutate({ repoId, reviewed: true, snoozeDays: null })
+        }
+      >
+        Reviewed
+      </Button>
+      <Select
+        onValueChange={(v) => {
+          const days = Number(v);
+          if (Number.isFinite(days)) {
+            mutation.mutate({ repoId, reviewed: null, snoozeDays: days });
+          }
+        }}
+      >
+        <SelectTrigger className="h-7 w-[6.5rem] px-2 text-[11px]">
+          <SelectValue placeholder="Snooze" />
+        </SelectTrigger>
+        <SelectContent>
+          {SNOOZE_OPTIONS.map((opt) => (
+            <SelectItem key={opt.days} value={String(opt.days)}>
+              {opt.label}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+    </div>
+  );
+}
+
 function RepoRow({
   repo,
   selected,
   onSelect,
   compact,
+  reviewMode,
 }: {
   repo: RepoSummary;
   selected: boolean;
   onSelect: () => void;
   compact?: boolean;
+  reviewMode?: boolean;
 }) {
   const { owner, name } = repoNameParts(repo.fullName);
   const topics = repo.topics.slice(0, compact ? 2 : 4);
@@ -47,14 +134,21 @@ function RepoRow({
       : null;
 
   return (
-    <button
-      type="button"
+    <div
       draggable
       onDragStart={(e) => {
         e.dataTransfer.setData(REPO_DND_TYPE, String(repo.id));
         e.dataTransfer.effectAllowed = "move";
       }}
       onClick={onSelect}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          onSelect();
+        }
+      }}
+      role="button"
+      tabIndex={0}
       className={cn(
         "flex w-full cursor-grab gap-3 border-b border-border/80 px-4 py-3 text-left transition-colors active:cursor-grabbing",
         selected ? "bg-accent" : "hover:bg-muted/40",
@@ -93,6 +187,15 @@ function RepoRow({
         </div>
 
         <div className="mt-2 flex flex-wrap items-center gap-1.5">
+          {repo.reviewReason ? (
+            <Badge
+              variant="secondary"
+              className="rounded-full px-2 py-0.5 font-normal text-[11px]"
+              title={repo.reviewReason}
+            >
+              {repo.reviewReason}
+            </Badge>
+          ) : null}
           {relevance != null ? (
             <Badge
               variant="secondary"
@@ -135,8 +238,16 @@ function RepoRow({
             </span>
           ) : null}
         </div>
+        {reviewMode ? (
+          <div className="mt-2">
+            <ReviewActions
+              repoId={repo.id}
+              htmlUrl={`https://github.com/${repo.fullName}`}
+            />
+          </div>
+        ) : null}
       </div>
-    </button>
+    </div>
   );
 }
 
@@ -146,12 +257,14 @@ export function RepoVirtualList({
   selectedId,
   onSelect,
   onEndReached,
+  emptyMessage,
+  reviewMode,
 }: Props) {
   const parentRef = useRef<HTMLDivElement>(null);
   const isGrid = layout === "grid";
   const columns = isGrid ? 2 : 1;
   const rowCount = Math.ceil(items.length / columns);
-  const estimate = isGrid ? 132 : 104;
+  const estimate = isGrid ? 132 : reviewMode ? 136 : 104;
 
   const virtualizer = useVirtualizer({
     count: rowCount,
@@ -204,6 +317,7 @@ export function RepoVirtualList({
                   selected={selectedId === repo.id}
                   onSelect={() => onSelect(repo.id)}
                   compact={isGrid}
+                  reviewMode={reviewMode}
                 />
               ))}
             </div>
@@ -211,8 +325,8 @@ export function RepoVirtualList({
         })}
       </div>
       {items.length === 0 ? (
-        <div className="flex h-40 items-center justify-center text-sm text-muted-foreground">
-          No repositories match your filters.
+        <div className="flex h-40 items-center justify-center px-6 text-center text-sm text-muted-foreground">
+          {emptyMessage ?? "No repositories match your filters."}
         </div>
       ) : null}
     </div>

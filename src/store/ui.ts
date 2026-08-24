@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { RepoSort, SearchMode } from "@/types";
+import type { RepoSort, ReviewPreset, SearchMode } from "@/types";
 
 export type AppView = "library" | "categories" | "insights" | "settings";
 export type LibraryLayout = "list" | "grid";
@@ -44,14 +44,50 @@ type UiState = {
   language: string | null;
   topic: string | null;
   categoryId: number | null;
+  reviewPreset: ReviewPreset | null;
   setLanguage: (v: string | null) => void;
   setTopic: (v: string | null) => void;
   setCategoryId: (v: number | null) => void;
+  setReviewPreset: (preset: ReviewPreset | null) => void;
+  openLibraryReview: (opts: {
+    preset: ReviewPreset;
+    categoryId?: number | null;
+  }) => void;
   clearFilters: () => void;
 
   selectedRepoId: number | null;
   setSelectedRepoId: (id: number | null) => void;
 };
+
+function patchForPreset(preset: ReviewPreset | null): Partial<UiState> {
+  if (preset == null) {
+    return {
+      reviewPreset: null,
+      sort: "starredAt",
+      sortDesc: true,
+    };
+  }
+  const base: Partial<UiState> = {
+    reviewPreset: preset,
+    sort: "stale",
+    sortDesc: false,
+  };
+  if (preset === "archived") {
+    return { ...base, hideArchived: false, hideUnstarred: true };
+  }
+  if (preset === "unstarred") {
+    return { ...base, hideUnstarred: false, hideArchived: false };
+  }
+  if (preset === "uncategorized") {
+    return {
+      ...base,
+      hideUnstarred: true,
+      hideArchived: true,
+      categoryId: null,
+    };
+  }
+  return { ...base, hideUnstarred: true };
+}
 
 export const useUiStore = create<UiState>((set) => ({
   view: "library",
@@ -94,15 +130,46 @@ export const useUiStore = create<UiState>((set) => ({
 
   hideUnstarred: true,
   hideArchived: true,
-  setHideUnstarred: (hideUnstarred) => set({ hideUnstarred }),
-  setHideArchived: (hideArchived) => set({ hideArchived }),
+  setHideUnstarred: (hideUnstarred) =>
+    set((s) => ({
+      hideUnstarred,
+      reviewPreset:
+        hideUnstarred && s.reviewPreset === "unstarred"
+          ? null
+          : s.reviewPreset,
+    })),
+  setHideArchived: (hideArchived) =>
+    set((s) => ({
+      hideArchived,
+      reviewPreset:
+        hideArchived && s.reviewPreset === "archived" ? null : s.reviewPreset,
+    })),
 
   language: null,
   topic: null,
   categoryId: null,
+  reviewPreset: null,
   setLanguage: (language) => set({ language }),
   setTopic: (topic) => set({ topic }),
-  setCategoryId: (categoryId) => set({ categoryId }),
+  setCategoryId: (categoryId) =>
+    set((s) => ({
+      categoryId,
+      reviewPreset:
+        categoryId != null && s.reviewPreset === "uncategorized"
+          ? null
+          : s.reviewPreset,
+    })),
+  setReviewPreset: (preset) => set(patchForPreset(preset)),
+  openLibraryReview: ({ preset, categoryId }) =>
+    set((s) => ({
+      view: "library",
+      selectedRepoId: null,
+      ...patchForPreset(preset),
+      categoryId:
+        preset === "uncategorized"
+          ? null
+          : (categoryId ?? s.categoryId),
+    })),
   clearFilters: () => set({ language: null, topic: null, categoryId: null }),
 
   selectedRepoId: null,

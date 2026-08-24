@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { listen } from "@tauri-apps/api/event";
-import { LayoutGrid, List, Search, X } from "lucide-react";
+import { Inbox, LayoutGrid, List, Search, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -15,16 +15,24 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { isCancelledMessage } from "@/lib/jobStatus";
+import { REVIEW_PRESETS, reviewPresetMeta } from "@/lib/review";
 import {
   cancelEmbedding,
   getEmbedStatus,
   getLibraryFacets,
   getOllamaStatus,
+  getReviewCounts,
   startEmbedding,
 } from "@/lib/tauri";
 import { cn } from "@/lib/utils";
 import { useUiStore } from "@/store/ui";
-import type { EmbedProgress, RepoFilters, RepoSort, SearchMode } from "@/types";
+import type {
+  EmbedProgress,
+  RepoFilters,
+  RepoSort,
+  ReviewPreset,
+  SearchMode,
+} from "@/types";
 
 type Props = {
   searchRef: React.Ref<HTMLInputElement>;
@@ -62,6 +70,8 @@ export function LibraryToolbar({ searchRef, total, searchHint }: Props) {
   const setTopic = useUiStore((s) => s.setTopic);
   const clearFilters = useUiStore((s) => s.clearFilters);
   const categoryId = useUiStore((s) => s.categoryId);
+  const reviewPreset = useUiStore((s) => s.reviewPreset);
+  const setReviewPreset = useUiStore((s) => s.setReviewPreset);
 
   const filters: RepoFilters = {
     hideUnstarred,
@@ -69,11 +79,17 @@ export function LibraryToolbar({ searchRef, total, searchHint }: Props) {
     language,
     topic,
     categoryId,
+    reviewPreset,
   };
 
   const facets = useQuery({
     queryKey: ["facets", filters],
     queryFn: () => getLibraryFacets(filters),
+  });
+
+  const reviewCounts = useQuery({
+    queryKey: ["reviewCounts"],
+    queryFn: getReviewCounts,
   });
 
   const ollama = useQuery({
@@ -163,7 +179,9 @@ export function LibraryToolbar({ searchRef, total, searchHint }: Props) {
   const coverage = embedStatus.data?.coverage ?? 0;
   const needEmbeddings =
     (embedStatus.data?.staleOrMissing ?? 0) > 0 || coverage < 0.9;
-  const hasChips = language != null || topic != null || categoryId != null;
+  const hasChips =
+    language != null || topic != null || categoryId != null || reviewPreset != null;
+  const countFor = (id: ReviewPreset) => reviewCounts.data?.[id] ?? null;
   // Semantic/Hybrid results are RRF-ordered; sort control would be misleading.
   const sortedByRelevance =
     query.trim().length > 0 &&
@@ -212,6 +230,32 @@ export function LibraryToolbar({ searchRef, total, searchHint }: Props) {
             );
           })}
         </div>
+        <Select
+          value={reviewPreset ?? "browse"}
+          onValueChange={(v) =>
+            setReviewPreset(v === "browse" ? null : (v as ReviewPreset))
+          }
+        >
+          <SelectTrigger
+            className="h-10 w-[11.5rem]"
+            aria-label="Review queue"
+          >
+            <Inbox className="size-4" />
+            <SelectValue placeholder="Review" />
+          </SelectTrigger>
+          <SelectContent className="w-80">
+            <SelectItem value="browse">Browse library</SelectItem>
+            {REVIEW_PRESETS.map((p) => {
+              const n = countFor(p.id);
+              return (
+                <SelectItem key={p.id} value={p.id} title={p.description}>
+                  {p.label}
+                  {n != null ? ` (${n})` : ""}
+                </SelectItem>
+              );
+            })}
+          </SelectContent>
+        </Select>
         {sortedByRelevance ? (
           <Badge
             variant="secondary"
@@ -230,6 +274,7 @@ export function LibraryToolbar({ searchRef, total, searchHint }: Props) {
               <SelectItem value="stars">Stars</SelectItem>
               <SelectItem value="pushedAt">Pushed</SelectItem>
               <SelectItem value="name">Name</SelectItem>
+              <SelectItem value="stale">Oldest / stale</SelectItem>
             </SelectContent>
           </Select>
         )}
@@ -256,7 +301,12 @@ export function LibraryToolbar({ searchRef, total, searchHint }: Props) {
           </Button>
         </div>
         <span className="ml-auto text-xs font-medium text-muted-foreground">
-          {total.toLocaleString()} repositories
+          {total.toLocaleString()}{" "}
+          {reviewPreset
+            ? reviewPreset === "unstarred"
+              ? "in history"
+              : "in review"
+            : "repositories"}
         </span>
       </div>
 
@@ -319,6 +369,7 @@ export function LibraryToolbar({ searchRef, total, searchHint }: Props) {
           <Checkbox
             id="hide-unstarred"
             checked={hideUnstarred}
+            disabled={reviewPreset === "unstarred"}
             onCheckedChange={(v) => setHideUnstarred(v === true)}
           />
           <Label htmlFor="hide-unstarred">Hide unstarred</Label>
@@ -327,11 +378,35 @@ export function LibraryToolbar({ searchRef, total, searchHint }: Props) {
           <Checkbox
             id="hide-archived"
             checked={hideArchived}
+            disabled={
+              reviewPreset === "archived" || reviewPreset === "unstarred"
+            }
             onCheckedChange={(v) => setHideArchived(v === true)}
           />
           <Label htmlFor="hide-archived">Hide archived</Label>
         </div>
       </div>
+
+      {reviewPreset ? (
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-xs font-medium text-muted-foreground">
+            Review
+          </span>
+          <button type="button" onClick={() => setReviewPreset(null)}>
+            <Badge
+              variant="default"
+              className="cursor-pointer gap-1 rounded-full px-2.5 py-0.5 font-normal"
+              title={reviewPresetMeta(reviewPreset).description}
+            >
+              {reviewPresetMeta(reviewPreset).label}
+              <X className="size-3" />
+            </Badge>
+          </button>
+          <span className="text-[11px] text-muted-foreground">
+            {reviewPresetMeta(reviewPreset).description}
+          </span>
+        </div>
+      ) : null}
 
       <div className="flex flex-wrap items-center gap-2">
         <span className="text-xs font-medium text-muted-foreground">
