@@ -12,12 +12,12 @@ import {
 } from "@/components/ui/card";
 import {
   canDismissOnboarding,
+  type DerivedSetupStep,
   deriveSetupSteps,
   nextActionableStep,
   requiredStepsComplete,
-  setupTruthFromStatus,
-  type DerivedSetupStep,
   type SetupSurface,
+  setupTruthFromStatus,
 } from "@/lib/onboarding";
 import {
   getEmbedStatus,
@@ -130,8 +130,7 @@ export function OnboardingGuide({ variant }: Props) {
 
   const next = nextActionableStep(steps);
   const requiredDone = requiredStepsComplete(steps);
-  const syncing =
-    syncMutation.isPending || syncQuery.data?.running === true;
+  const syncing = syncMutation.isPending || syncQuery.data?.running === true;
   const embedding =
     embedMutation.isPending || embedQuery.data?.running === true;
   const ollamaOffline = ollamaQuery.data != null && !ollamaQuery.data.available;
@@ -245,7 +244,9 @@ export function OnboardingGuide({ variant }: Props) {
       data-onboarding-guide
       aria-labelledby="onboarding-heading"
       className={cn(
-        variant === "full" ? "mx-auto flex w-full max-w-2xl flex-col p-8" : "p-4",
+        variant === "full"
+          ? "mx-auto flex w-full max-w-2xl flex-col p-8"
+          : "p-4",
       )}
     >
       <Card>
@@ -270,9 +271,7 @@ export function OnboardingGuide({ variant }: Props) {
                 variant="ghost"
                 size="sm"
                 onClick={() => dismissMutation.mutate()}
-                disabled={
-                  !canDismissOnboarding() || dismissMutation.isPending
-                }
+                disabled={!canDismissOnboarding() || dismissMutation.isPending}
               >
                 Skip for now
               </Button>
@@ -282,9 +281,7 @@ export function OnboardingGuide({ variant }: Props) {
                 size="icon-sm"
                 aria-label="Close setup guide"
                 onClick={() => dismissMutation.mutate()}
-                disabled={
-                  !canDismissOnboarding() || dismissMutation.isPending
-                }
+                disabled={!canDismissOnboarding() || dismissMutation.isPending}
               >
                 <X className="size-4" />
               </Button>
@@ -402,4 +399,3 @@ function StepIcon({ state }: { state: DerivedSetupStep["state"] }) {
     />
   );
 }
-

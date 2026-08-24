@@ -636,8 +636,8 @@ export function SettingsView() {
             <CardHeader>
               <CardTitle>Setup guide</CardTitle>
               <CardDescription>
-                Reopen the first-run checklist. Progress comes from your
-                current GitHub, sync, category, and embedding status.
+                Reopen the first-run checklist. Progress comes from your current
+                GitHub, sync, category, and embedding status.
               </CardDescription>
             </CardHeader>
             <CardContent>

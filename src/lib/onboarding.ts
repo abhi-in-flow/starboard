@@ -79,7 +79,11 @@ export function deriveSetupSteps(truth: SetupTruth): DerivedSetupStep[] {
     title: "Initial sync",
     description: "Pull starred repositories into the local library.",
     optional: false,
-    state: synced ? "complete" : truth.githubConnected ? "available" : "blocked",
+    state: synced
+      ? "complete"
+      : truth.githubConnected
+        ? "available"
+        : "blocked",
     detail: synced
       ? `${truth.repoCount.toLocaleString()} repositor${truth.repoCount === 1 ? "y" : "ies"}${
           truth.lastSyncedAt ? " · last sync recorded" : ""
@@ -115,7 +119,8 @@ export function deriveSetupSteps(truth: SetupTruth): DerivedSetupStep[] {
   const taxonomy: DerivedSetupStep = {
     id: "taxonomy",
     title: "Generate taxonomy",
-    description: "Review and commit categories. You can start from a blank draft.",
+    description:
+      "Review and commit categories. You can start from a blank draft.",
     optional: true,
     state: hasTaxonomy ? "complete" : "available",
     detail: hasTaxonomy
@@ -155,7 +160,9 @@ export function deriveSetupSteps(truth: SetupTruth): DerivedSetupStep[] {
 }
 
 export function requiredStepsComplete(steps: DerivedSetupStep[]): boolean {
-  return steps.filter((step) => !step.optional).every((step) => step.state === "complete");
+  return steps
+    .filter((step) => !step.optional)
+    .every((step) => step.state === "complete");
 }
 
 /** Optional AI rows never gate dismissal or Keyword-only use. */
