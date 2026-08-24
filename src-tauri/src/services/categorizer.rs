@@ -8,13 +8,12 @@ use serde_json::Value;
 use tauri::{AppHandle, Emitter, Manager};
 
 use crate::error::{AppError, AppResult};
-use crate::models::{
-    CategorizeProgress, TaxonomyDraft, TaxonomyEdit, TaxonomyNodeEdit,
-};
+use crate::models::{CategorizeProgress, TaxonomyDraft, TaxonomyEdit, TaxonomyNodeEdit};
 use crate::services::github::truncate_utf8;
+use crate::services::jobs::CancelFlag;
 use crate::services::ollama::OllamaClient;
 use crate::services::settings;
-use crate::services::store::DbState;
+use crate::services::store::{self, DbState};
 
 /// Repos per assignment request to Ollama (HLD §5).
 const ASSIGNMENT_BATCH_SIZE: i64 = 25;
@@ -37,6 +36,7 @@ Respond with JSON only, matching the schema.";
 pub struct CategorizeState {
     pub running: AtomicBool,
     pub last_error: Mutex<Option<String>>,
+    pub cancel: CancelFlag,
 }
 
 impl Default for CategorizeState {
@@ -44,8 +44,17 @@ impl Default for CategorizeState {
         Self {
             running: AtomicBool::new(false),
             last_error: Mutex::new(None),
+            cancel: CancelFlag::default(),
         }
     }
+}
+
+pub fn request_cancel(state: &CategorizeState) -> AppResult<()> {
+    if !state.running.load(Ordering::SeqCst) {
+        return Err(AppError::ollama("categorization is not running"));
+    }
+    state.cancel.request();
+    Ok(())
 }
 
 /// (id, name, parent_id) — a flattened view of the `categories` table.
@@ -114,10 +123,9 @@ pub fn map_assignment(
 
     if let Some(sub) = subcategory.map(str::trim).filter(|s| !s.is_empty()) {
         let norm_sub = normalize_name(sub);
-        if let Some((sub_id, _, _)) = taxonomy
-            .iter()
-            .find(|(_, name, parent_id)| *parent_id == Some(*top_id) && normalize_name(name) == norm_sub)
-        {
+        if let Some((sub_id, _, _)) = taxonomy.iter().find(|(_, name, parent_id)| {
+            *parent_id == Some(*top_id) && normalize_name(name) == norm_sub
+        }) {
             return *sub_id;
         }
     }
@@ -196,6 +204,10 @@ pub fn load_taxonomy_edit(conn: &Connection) -> AppResult<TaxonomyEdit> {
 /// In-place taxonomy update: rename/add/remove while keeping stable ids so existing
 /// `repo_categories` rows survive renames. Removed category ids drop their assignments only.
 pub fn update_taxonomy(conn: &Connection, edit: &TaxonomyEdit) -> AppResult<()> {
+    store::with_tx(conn, |tx| update_taxonomy_inner(tx, edit))
+}
+
+fn update_taxonomy_inner(conn: &Connection, edit: &TaxonomyEdit) -> AppResult<()> {
     let existing = list_taxonomy_flat(conn)?;
     if existing.is_empty() {
         return Err(AppError::new(
@@ -240,7 +252,10 @@ pub fn update_taxonomy(conn: &Connection, edit: &TaxonomyEdit) -> AppResult<()> 
     to_delete.sort_by_key(|(_, parent_id)| parent_id.is_none());
 
     for (id, _) in &to_delete {
-        conn.execute("DELETE FROM repo_categories WHERE category_id = ?1", params![id])?;
+        conn.execute(
+            "DELETE FROM repo_categories WHERE category_id = ?1",
+            params![id],
+        )?;
     }
     for (id, _) in &to_delete {
         conn.execute("DELETE FROM categories WHERE id = ?1", params![id])?;
@@ -279,7 +294,12 @@ fn upsert_category_node(
 /// overrides) since remapping old assignments onto a brand-new tree isn't well-defined.
 /// Callers must warn the user before passing `force = true`.
 pub fn commit_taxonomy(conn: &Connection, draft: &TaxonomyDraft, force: bool) -> AppResult<()> {
-    let existing_count: i64 = conn.query_row("SELECT COUNT(*) FROM categories", [], |r| r.get(0))?;
+    store::with_tx(conn, |tx| commit_taxonomy_inner(tx, draft, force))
+}
+
+fn commit_taxonomy_inner(conn: &Connection, draft: &TaxonomyDraft, force: bool) -> AppResult<()> {
+    let existing_count: i64 =
+        conn.query_row("SELECT COUNT(*) FROM categories", [], |r| r.get(0))?;
     if existing_count > 0 && !force {
         return Err(AppError::new(
             "taxonomy_exists",
@@ -337,7 +357,8 @@ fn get_or_create_category(conn: &Connection, name: &str, parent_id: Option<i64>)
 }
 
 fn parse_topics_json(raw: Option<String>) -> Vec<String> {
-    raw.and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default()
+    raw.and_then(|s| serde_json::from_str(&s).ok())
+        .unwrap_or_default()
 }
 
 fn map_taxonomy_sample_row(row: &Row<'_>) -> rusqlite::Result<TaxonomySampleRepo> {
@@ -383,7 +404,10 @@ fn stratified_sample(all: Vec<TaxonomySampleRepo>, target: usize) -> Vec<Taxonom
     let mut buckets: std::collections::BTreeMap<String, Vec<TaxonomySampleRepo>> =
         std::collections::BTreeMap::new();
     for repo in all {
-        let key = repo.language.clone().unwrap_or_else(|| "Unknown".to_string());
+        let key = repo
+            .language
+            .clone()
+            .unwrap_or_else(|| "Unknown".to_string());
         buckets.entry(key).or_default().push(repo);
     }
 
@@ -499,15 +523,20 @@ pub fn set_manual_category(conn: &Connection, repo_id: i64, category_id: i64) ->
         |row| row.get(0),
     )?;
     if !repo_exists {
-        return Err(AppError::new("not_found", format!("repo {repo_id} not found")));
+        return Err(AppError::new(
+            "not_found",
+            format!("repo {repo_id} not found"),
+        ));
     }
 
-    conn.execute("DELETE FROM repo_categories WHERE repo_id = ?1", [repo_id])?;
-    conn.execute(
-        "INSERT INTO repo_categories (repo_id, category_id, source, confidence) VALUES (?1, ?2, 'manual', 1.0)",
-        params![repo_id, category_id],
-    )?;
-    Ok(())
+    store::with_tx(conn, |tx| {
+        tx.execute("DELETE FROM repo_categories WHERE repo_id = ?1", [repo_id])?;
+        tx.execute(
+            "INSERT INTO repo_categories (repo_id, category_id, source, confidence) VALUES (?1, ?2, 'manual', 1.0)",
+            params![repo_id, category_id],
+        )?;
+        Ok(())
+    })
 }
 
 /// Writes LLM assignments for exactly `batch_ids`. Repos that the model didn't return an
@@ -525,21 +554,33 @@ fn apply_assignments(
         by_id.insert(item.repo_id, item);
     }
 
-    for &repo_id in batch_ids {
-        let item = by_id.get(&repo_id);
-        let category_id = match item {
-            Some(item) => map_assignment(&item.category, item.subcategory.as_deref(), taxonomy, uncategorized_id),
-            None => uncategorized_id,
-        };
-        let confidence = item.and_then(|i| i.confidence);
+    store::with_tx(conn, |tx| {
+        for &repo_id in batch_ids {
+            // Defense in depth: never overwrite a manual override even if the
+            // caller failed to exclude the repo from the batch.
+            if has_manual_category(tx, repo_id)? {
+                continue;
+            }
+            let item = by_id.get(&repo_id);
+            let category_id = match item {
+                Some(item) => map_assignment(
+                    &item.category,
+                    item.subcategory.as_deref(),
+                    taxonomy,
+                    uncategorized_id,
+                ),
+                None => uncategorized_id,
+            };
+            let confidence = item.and_then(|i| i.confidence);
 
-        conn.execute("DELETE FROM repo_categories WHERE repo_id = ?1", [repo_id])?;
-        conn.execute(
-            "INSERT INTO repo_categories (repo_id, category_id, source, confidence) VALUES (?1, ?2, 'llm', ?3)",
-            params![repo_id, category_id, confidence],
-        )?;
-    }
-    Ok(())
+            tx.execute("DELETE FROM repo_categories WHERE repo_id = ?1", [repo_id])?;
+            tx.execute(
+                "INSERT INTO repo_categories (repo_id, category_id, source, confidence) VALUES (?1, ?2, 'llm', ?3)",
+                params![repo_id, category_id, confidence],
+            )?;
+        }
+        Ok(())
+    })
 }
 
 // ---------------------------------------------------------------------------
@@ -643,12 +684,17 @@ pub async fn generate_taxonomy(app: &AppHandle) -> AppResult<TaxonomyDraft> {
 
     let status = client.health_check().await?;
     if !status.available {
-        return Err(AppError::ollama(format!("Ollama is offline: {}", status.message)));
+        return Err(AppError::ollama(format!(
+            "Ollama is offline: {}",
+            status.message
+        )));
     }
 
     let sample = with_db(app, sample_repos_for_taxonomy)?;
     if sample.is_empty() {
-        return Err(AppError::ollama("no repos available to build a taxonomy from"));
+        return Err(AppError::ollama(
+            "no repos available to build a taxonomy from",
+        ));
     }
 
     let user_prompt = build_taxonomy_prompt(&sample);
@@ -682,6 +728,7 @@ pub async fn run_assignment(app: AppHandle) -> AppResult<()> {
     {
         return Err(AppError::ollama("categorization is already running"));
     }
+    state.cancel.reset();
     if let Ok(mut last_error) = state.last_error.lock() {
         *last_error = None;
     }
@@ -703,20 +750,29 @@ async fn run_assignment_inner(app: &AppHandle) -> AppResult<()> {
 
     let status = client.health_check().await?;
     if !status.available {
-        return Err(AppError::ollama(format!("Ollama is offline: {}", status.message)));
+        return Err(AppError::ollama(format!(
+            "Ollama is offline: {}",
+            status.message
+        )));
     }
 
     let taxonomy = with_db(app, list_taxonomy_flat)?;
     if taxonomy.is_empty() {
-        return Err(AppError::ollama("commit a taxonomy before running assignment"));
+        return Err(AppError::ollama(
+            "commit a taxonomy before running assignment",
+        ));
     }
     let uncategorized_id = with_db(app, ensure_uncategorized)?;
 
     let total = with_db(app, count_uncategorized)?.max(0) as u32;
     let mut processed = 0u32;
-    emit_progress(app, progress("assign", 0, total, "Starting categorization…", None));
+    emit_progress(
+        app,
+        progress("assign", 0, total, "Starting categorization…", None),
+    );
 
     loop {
+        app.state::<CategorizeState>().cancel.check()?;
         let batch = with_db(app, |conn| uncategorized_repos(conn, ASSIGNMENT_BATCH_SIZE))?;
         if batch.is_empty() {
             break;
@@ -745,7 +801,13 @@ async fn run_assignment_inner(app: &AppHandle) -> AppResult<()> {
 
     emit_progress(
         app,
-        progress("assign", processed, processed, "Categorization complete", None),
+        progress(
+            "assign",
+            processed,
+            processed,
+            "Categorization complete",
+            None,
+        ),
     );
     Ok(())
 }
@@ -765,7 +827,10 @@ pub async fn recategorize_single_repo(app: &AppHandle, repo_id: i64) -> AppResul
 
     let status = client.health_check().await?;
     if !status.available {
-        return Err(AppError::ollama(format!("Ollama is offline: {}", status.message)));
+        return Err(AppError::ollama(format!(
+            "Ollama is offline: {}",
+            status.message
+        )));
     }
 
     let taxonomy = with_db(app, list_taxonomy_flat)?;
@@ -957,9 +1022,11 @@ mod tests {
         set_manual_category(&conn, 1, 2).expect("assign B");
 
         let rows: i64 = conn
-            .query_row("SELECT COUNT(*) FROM repo_categories WHERE repo_id = 1", [], |r| {
-                r.get(0)
-            })
+            .query_row(
+                "SELECT COUNT(*) FROM repo_categories WHERE repo_id = 1",
+                [],
+                |r| r.get(0),
+            )
             .expect("count");
         assert_eq!(rows, 1);
         let (category_id, source): (i64, String) = conn
@@ -1024,8 +1091,14 @@ mod tests {
 
         let sampled = stratified_sample(repos, 400);
         assert_eq!(sampled.len(), 400);
-        let rust_count = sampled.iter().filter(|r| r.language.as_deref() == Some("Rust")).count();
-        let go_count = sampled.iter().filter(|r| r.language.as_deref() == Some("Go")).count();
+        let rust_count = sampled
+            .iter()
+            .filter(|r| r.language.as_deref() == Some("Rust"))
+            .count();
+        let go_count = sampled
+            .iter()
+            .filter(|r| r.language.as_deref() == Some("Go"))
+            .count();
         assert_eq!(rust_count, 200);
         assert_eq!(go_count, 200);
     }
@@ -1073,12 +1146,10 @@ mod tests {
             reloaded.categories[0].subcategories[0].name,
             "Agent Frameworks"
         );
-        assert!(
-            reloaded.categories[0]
-                .subcategories
-                .iter()
-                .any(|s| s.name == "RAG")
-        );
+        assert!(reloaded.categories[0]
+            .subcategories
+            .iter()
+            .any(|s| s.name == "RAG"));
 
         let assigned: i64 = conn
             .query_row(
@@ -1088,6 +1159,66 @@ mod tests {
             )
             .expect("still assigned");
         assert_eq!(assigned, sub_id);
+    }
+
+    #[test]
+    fn apply_assignments_never_overwrites_manual() {
+        let conn = test_conn();
+        conn.execute(
+            "INSERT INTO categories (id, name, parent_id) VALUES (1, 'AI/LLM', NULL), (99, 'Uncategorized', NULL)",
+            [],
+        )
+        .expect("cats");
+        conn.execute(
+            "INSERT INTO repos (id, full_name, owner, name, html_url, starred_at, fetched_at)
+             VALUES (5, 'o/r', 'o', 'r', 'https://x', '2024-01-01T00:00:00Z', '2024-01-01T00:00:00Z')",
+            [],
+        )
+        .expect("repo");
+        set_manual_category(&conn, 5, 1).expect("manual");
+        apply_assignments(
+            &conn,
+            &[AssignmentItem {
+                repo_id: 5,
+                category: "Uncategorized".into(),
+                subcategory: None,
+                confidence: Some(0.1),
+            }],
+            &taxonomy(),
+            99,
+            &[5],
+        )
+        .expect("apply");
+        let (cat, source): (i64, String) = conn
+            .query_row(
+                "SELECT category_id, source FROM repo_categories WHERE repo_id = 5",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .expect("row");
+        assert_eq!(cat, 1);
+        assert_eq!(source, "manual");
+    }
+
+    #[test]
+    fn taxonomy_update_rolls_back_on_error() {
+        let conn = test_conn();
+        let draft = TaxonomyDraft {
+            categories: vec![crate::models::TaxonomyCategoryDraft {
+                name: "Keep".into(),
+                subcategories: vec![],
+            }],
+        };
+        commit_taxonomy(&conn, &draft, false).expect("commit");
+        let before = list_taxonomy_flat(&conn).expect("before");
+        let err = crate::services::store::with_tx(&conn, |tx| {
+            tx.execute("DELETE FROM categories", [])?;
+            Err::<(), _>(AppError::db("injected taxonomy failure"))
+        })
+        .expect_err("fail");
+        assert_eq!(err.message, "injected taxonomy failure");
+        let after = list_taxonomy_flat(&conn).expect("after");
+        assert_eq!(before.len(), after.len());
     }
 
     #[test]
@@ -1113,7 +1244,9 @@ mod tests {
         set_manual_category(&conn, 1, editors_id).expect("assign");
 
         let mut next = edit;
-        next.categories[0].subcategories.retain(|s| s.id == Some(cli_id));
+        next.categories[0]
+            .subcategories
+            .retain(|s| s.id == Some(cli_id));
         update_taxonomy(&conn, &next).expect("update");
 
         let remaining: i64 = conn
