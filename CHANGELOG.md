@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.13.0 — UI and accessibility polish
+
+- Contextual empty states, library toolbar hierarchy, named filter chips, sort direction, and search mode-used fallback.
+- Keyboard listbox scrolling, responsive category/detail layout, and reduced-motion-aware accessibility.
+- Global health strip, Insights period narrative with precise dormant wording, and user-facing Settings/backup copy.
+- Lazy-loaded Insights, Categories, and Settings views to shrink the main bundle.
+
 ## 0.12.0 — Backup and restore
 
 - Settings → Status Data section: create a consistent SQLite backup, validate a file, and restore with explicit confirmation. Database integrity stays on the existing Status integrity card.
