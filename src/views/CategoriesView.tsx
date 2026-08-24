@@ -284,7 +284,7 @@ export function CategoriesView() {
   const offline = ollama.data != null && !ollama.data.available;
   const offlineHint =
     ollama.data?.message ||
-    "Ollama offline — set base URL + chat model in Settings.";
+    "Ollama is unreachable — set a base URL and chat model in Settings.";
   const hasCommitted = (categories.data?.length ?? 0) > 0;
   const running = categorizeStatus.data?.running === true;
   const saving = commitMutation.isPending || saveEditMutation.isPending;
@@ -408,7 +408,9 @@ export function CategoriesView() {
         </div>
         {ollama.data ? (
           <Badge variant={ollama.data.available ? "default" : "secondary"}>
-            {ollama.data.available ? "Ollama online" : "Ollama offline"}
+            {ollama.data.available
+              ? "Ollama is reachable"
+              : "Ollama is unreachable"}
           </Badge>
         ) : null}
       </div>
@@ -420,12 +422,18 @@ export function CategoriesView() {
       ) : null}
 
       {actionNotice ? (
-        <p className="rounded-md border border-border bg-muted/40 px-3 py-2 text-sm text-muted-foreground">
+        <p
+          className="rounded-md border border-border bg-muted/40 px-3 py-2 text-sm text-muted-foreground"
+          role="status"
+        >
           {actionNotice}
         </p>
       ) : null}
       {actionError ? (
-        <p className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+        <p
+          className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive"
+          role="alert"
+        >
           {actionError}
         </p>
       ) : null}

@@ -138,8 +138,8 @@ export function DataBackupCard({ data }: Props) {
       <CardHeader>
         <CardTitle>Data</CardTitle>
         <CardDescription>
-          Consistent SQLite snapshots of this library. The GitHub token stays in
-          the OS keyring and is never exported.
+          Save or replace this library. Your GitHub token is not included — it
+          stays in the OS keyring and is never exported.
         </CardDescription>
       </CardHeader>
       <CardContent className="flex flex-col gap-4 text-sm">
@@ -173,10 +173,11 @@ export function DataBackupCard({ data }: Props) {
         </div>
 
         <p className="text-xs text-muted-foreground">
-          Restore is blocked while sync, README fetch, embedding, or
-          categorization is running. A safety copy of the current database is
-          written first; if restore fails the original library is put back. No
-          app restart is required.
+          Restore replaces the current library and is destructive. Starboard
+          writes a pre-restore safety copy first; if restore fails, that copy is
+          put back. Restore is blocked while sync, README fetch, embedding, or
+          categorization is running. The GitHub token is not part of the file
+          and will not change.
         </p>
 
         <div className="flex flex-wrap gap-2">
@@ -214,12 +215,21 @@ export function DataBackupCard({ data }: Props) {
         ) : null}
         {validation ? <p className="text-sm">{validation.message}</p> : null}
         {restoreResult ? (
-          <p className="text-sm">
-            Restored {restoreResult.repoCount} repos
-            {restoreResult.migrated ? " (older backup was migrated)" : ""}.
-            Safety copy: {restoreResult.preRestoreBackupPath}. GitHub token was
-            not changed.
-          </p>
+          <div className="space-y-2 text-sm" role="status">
+            <p>
+              Restored {restoreResult.repoCount} repos
+              {restoreResult.migrated ? " (older backup was migrated)" : ""}.
+              Pre-restore safety copy: {restoreResult.preRestoreBackupPath}.
+              Your GitHub token was not changed.
+            </p>
+            <p className="text-xs text-muted-foreground">
+              Next steps you may want: Resume READMEs from the header if
+              excerpts are pending, and Sync if the restored library should
+              match GitHub again. Embeddings and categories come from the
+              restored file — Starboard does not rebuild them automatically.
+              Relaunch only if the window looks stale.
+            </p>
+          </div>
         ) : null}
 
         {restorePreview ? (

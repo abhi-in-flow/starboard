@@ -31,11 +31,19 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { resolveCategoryId } from "@/lib/categories";
+import {
+  deriveInsightsNarrative,
+  heatmapAriaLabel,
+  heatmapSummary,
+  insightsLanguageLink,
+} from "@/lib/insightsNarrative";
 import { REVIEW_PRESETS } from "@/lib/review";
 import {
   getInsights,
   getInterestDriftDrilldown,
   getReviewCounts,
+  listCategories,
   writeLibraryExport,
 } from "@/lib/tauri";
 import { cn } from "@/lib/utils";
@@ -156,6 +164,7 @@ function RhythmHeatmap({ cells }: { cells: HeatmapCell[] }) {
 
   return (
     <div className="overflow-x-auto">
+      <p className="sr-only">{heatmapSummary(cells)}</p>
       <div className="inline-grid min-w-full grid-cols-[auto_repeat(24,minmax(0.75rem,1fr))] gap-0.5">
         <div />
         {HOURS.map((hour) => (
@@ -173,11 +182,14 @@ function RhythmHeatmap({ cells }: { cells: HeatmapCell[] }) {
             </div>
             {HOURS.map((hour) => {
               const count = lookup.get(`${dayIndex}-${hour}`) ?? 0;
+              const name = heatmapAriaLabel(label, hour, count);
               return (
-                <div
+                <button
                   key={`${label}-${hour}`}
-                  title={`${label} ${hour}:00 — ${count} star${count === 1 ? "" : "s"}`}
-                  className="aspect-square rounded-[2px] border border-transparent"
+                  type="button"
+                  title={name}
+                  aria-label={name}
+                  className="aspect-square rounded-[2px] border border-transparent focus-visible:ring-2 focus-visible:ring-ring"
                   style={{ background: heatmapColor(count, max) }}
                 />
               );
@@ -257,7 +269,7 @@ function ReviewQueuesCard({
   const links: { preset: ReviewPreset; hint: string }[] = [
     {
       preset: "inactive",
-      hint: "Dormant repos — no push in 12+ months.",
+      hint: "No push in 12+ months. This is repository inactivity, not category-velocity Dormant.",
     },
     {
       preset: "archived",
@@ -305,10 +317,10 @@ function ReviewQueuesCard({
 
 function MetricsTable({
   rows,
-  onDormant,
+  onCategory,
 }: {
   rows: InterestMetric[];
-  onDormant?: () => void;
+  onCategory?: (name: string) => void;
 }) {
   if (rows.length === 0) {
     return <EmptyHint>No category metrics for this range.</EmptyHint>;
@@ -330,7 +342,19 @@ function MetricsTable({
         <tbody>
           {rows.map((row) => (
             <tr key={row.category} className="border-b border-border/60">
-              <td className="py-2 pr-3 font-medium">{row.category}</td>
+              <td className="py-2 pr-3 font-medium">
+                {onCategory ? (
+                  <button
+                    type="button"
+                    className="hover:underline"
+                    onClick={() => onCategory(row.category)}
+                  >
+                    {row.category}
+                  </button>
+                ) : (
+                  row.category
+                )}
+              </td>
               <td className="py-2 pr-3 tabular-nums">{row.repoCount}</td>
               <td className="py-2 pr-3 text-muted-foreground">
                 {row.firstStarred?.slice(0, 10) ?? "—"}
@@ -345,12 +369,15 @@ function MetricsTable({
                 {formatVelocity(row.lifetimeVelocity)}
               </td>
               <td className="py-2">
-                {row.badge === "dormant" && onDormant ? (
-                  <button type="button" onClick={onDormant}>
+                {row.badge === "rising" && onCategory ? (
+                  <button
+                    type="button"
+                    onClick={() => onCategory(row.category)}
+                    title="Open this category in the library"
+                  >
                     <Badge
                       variant={badgeVariant(row.badge)}
                       className="capitalize"
-                      title="Open inactive review queue (no push in 12+ months)"
                     >
                       {row.badge}
                     </Badge>
@@ -359,6 +386,11 @@ function MetricsTable({
                   <Badge
                     variant={badgeVariant(row.badge)}
                     className="capitalize"
+                    title={
+                      row.badge === "dormant"
+                        ? "No new stars in this category for 6 months (starring velocity, not repo push activity)"
+                        : undefined
+                    }
                   >
                     {row.badge}
                   </Badge>
@@ -381,6 +413,8 @@ export function InsightsView() {
   const [exporting, setExporting] = useState(false);
   const [exportError, setExportError] = useState<string | null>(null);
   const openLibraryReview = useUiStore((s) => s.openLibraryReview);
+  const openLibraryCategory = useUiStore((s) => s.openLibraryCategory);
+  const openLibraryLanguage = useUiStore((s) => s.openLibraryLanguage);
 
   const range: InsightsDateRange = useMemo(() => {
     if (preset === "custom") {
@@ -419,7 +453,29 @@ export function InsightsView() {
     queryFn: getReviewCounts,
   });
 
+  const categories = useQuery({
+    queryKey: ["categories"],
+    queryFn: listCategories,
+  });
+
   const dash = insightsQuery.data;
+  const narrative = useMemo(
+    () => (dash ? deriveInsightsNarrative(dash) : null),
+    [dash],
+  );
+
+  function openCategoryName(name: string) {
+    const id = resolveCategoryId(categories.data ?? [], name);
+    if (id != null) {
+      openLibraryCategory(id);
+    }
+  }
+
+  function openLanguageName(name: string) {
+    if (insightsLanguageLink(name)) {
+      openLibraryLanguage(name);
+    }
+  }
   const timeline =
     grain === "weekly" ? dash?.timeline.weekly : dash?.timeline.monthly;
 
@@ -487,7 +543,9 @@ export function InsightsView() {
       </div>
 
       {exportError ? (
-        <p className="text-sm text-destructive">{exportError}</p>
+        <p className="text-sm text-destructive" role="alert">
+          {exportError}
+        </p>
       ) : null}
 
       <div className="flex flex-wrap items-end gap-3 rounded-lg border bg-card px-3 py-3">
@@ -499,7 +557,7 @@ export function InsightsView() {
             value={preset}
             onValueChange={(v) => setPreset(v as RangePreset)}
           >
-            <SelectTrigger className="w-40">
+            <SelectTrigger className="w-40" aria-label="Insights date range">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -513,8 +571,14 @@ export function InsightsView() {
         {preset === "custom" ? (
           <>
             <div className="space-y-1">
-              <p className="text-xs font-medium text-muted-foreground">From</p>
+              <label
+                htmlFor="insights-from"
+                className="text-xs font-medium text-muted-foreground"
+              >
+                From
+              </label>
               <Input
+                id="insights-from"
                 type="date"
                 value={customStart}
                 onChange={(e) => setCustomStart(e.target.value)}
@@ -522,8 +586,14 @@ export function InsightsView() {
               />
             </div>
             <div className="space-y-1">
-              <p className="text-xs font-medium text-muted-foreground">To</p>
+              <label
+                htmlFor="insights-to"
+                className="text-xs font-medium text-muted-foreground"
+              >
+                To
+              </label>
               <Input
+                id="insights-to"
                 type="date"
                 value={customEnd}
                 onChange={(e) => setCustomEnd(e.target.value)}
@@ -554,10 +624,43 @@ export function InsightsView() {
         </p>
       ) : null}
 
+      {narrative && dash && dash.meta.totalStars > 0 ? (
+        <section className="rounded-lg border bg-card px-4 py-3">
+          <h2 className="text-sm font-semibold">This period</h2>
+          <p className="mt-1 text-sm text-foreground/80">
+            {narrative.sentences.join(" ")}
+          </p>
+          {narrative.rising.length > 0 ||
+          narrative.dormantCategories.length > 0 ? (
+            <div className="mt-2 flex flex-wrap gap-1.5">
+              {narrative.rising.map((name) => (
+                <button
+                  key={`rise-${name}`}
+                  type="button"
+                  onClick={() => openCategoryName(name)}
+                >
+                  <Badge className="font-normal">Rising: {name}</Badge>
+                </button>
+              ))}
+              {narrative.dormantCategories.map((name) => (
+                <Badge
+                  key={`dorm-${name}`}
+                  variant="secondary"
+                  className="font-normal"
+                  title="No new stars in this category for 6 months — starring velocity, not repository push activity"
+                >
+                  Dormant: {name}
+                </Badge>
+              ))}
+            </div>
+          ) : null}
+        </section>
+      ) : null}
+
       {dash?.meta.shortHistory ? (
         <div className="rounded-md border border-dashed bg-muted/40 px-3 py-2 text-sm text-muted-foreground">
-          Short history (&lt;20 stars or &lt;3 months). Charts below still
-          render from what you have — treat trends as provisional.
+          Short history (&lt;20 stars or &lt;3 months). Charts still render from
+          what you have — treat trends as provisional, not forecasts.
         </div>
       ) : null}
 
@@ -586,6 +689,7 @@ export function InsightsView() {
                     size="xs"
                     variant={grain === g ? "default" : "outline"}
                     className="capitalize"
+                    aria-pressed={grain === g}
                     onClick={() => setGrain(g)}
                   >
                     {g}
@@ -671,16 +775,24 @@ export function InsightsView() {
             title="Language trend"
             description="Language share by quarter (top 8 + Other)."
           >
-            <StackedShareChart points={dash.languageTrend} />
+            <StackedShareChart
+              points={dash.languageTrend}
+              onBandClick={openLanguageName}
+            />
           </SectionCard>
 
           <SectionCard
             title="Interest metrics"
             description="Rising = recent velocity &gt; 1.5× lifetime; Dormant = no stars in 6 months."
           >
+            <p className="mb-3 text-xs text-muted-foreground">
+              Dormant here means no new stars in that category for 6 months, not
+              that the repositories stopped receiving pushes. For repos with no
+              push in 12+ months, use the Inactive review queue above.
+            </p>
             <MetricsTable
               rows={dash.interestMetrics}
-              onDormant={() => openLibraryReview({ preset: "inactive" })}
+              onCategory={openCategoryName}
             />
           </SectionCard>
 

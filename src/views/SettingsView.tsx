@@ -141,8 +141,8 @@ function StatusTab() {
             </p>
           ) : null}
           <p className="text-xs text-muted-foreground">
-            To (re)build vectors, use Build embeddings from the Library toolbar
-            when Ollama is online.
+            To rebuild search embeddings, use Build embeddings from the Library
+            toolbar when Ollama is reachable.
           </p>
         </CardContent>
       </Card>
@@ -371,14 +371,20 @@ export function SettingsView() {
       <div>
         <h1 className="text-2xl font-semibold tracking-tight">Settings</h1>
         <p className="text-sm text-muted-foreground">
-          Connect GitHub and configure the local Ollama endpoint.
+          Connect GitHub, choose an Ollama host, and review library health.
         </p>
       </div>
 
-      <div className="flex w-fit items-center rounded-lg border border-border p-0.5">
+      <div
+        role="tablist"
+        aria-label="Settings sections"
+        className="flex w-fit items-center rounded-lg border border-border p-0.5"
+      >
         <Button
           type="button"
           size="sm"
+          role="tab"
+          aria-selected={tab === "general"}
           variant={tab === "general" ? "secondary" : "ghost"}
           className={cn("h-8 px-3 text-xs")}
           onClick={() => setTab("general")}
@@ -388,6 +394,8 @@ export function SettingsView() {
         <Button
           type="button"
           size="sm"
+          role="tab"
+          aria-selected={tab === "status"}
           variant={tab === "status" ? "secondary" : "ghost"}
           className={cn("h-8 px-3 text-xs")}
           onClick={() => {
@@ -407,8 +415,9 @@ export function SettingsView() {
             <CardHeader>
               <CardTitle>GitHub</CardTitle>
               <CardDescription>
-                Personal access token is stored in the OS credential store and
-                never written to the database.
+                Your personal access token stays in the operating system
+                credential store. It is never written to the library database,
+                backups, or logs.
               </CardDescription>
             </CardHeader>
             <CardContent className="flex flex-col gap-4">
@@ -507,8 +516,9 @@ export function SettingsView() {
             <CardHeader>
               <CardTitle>Ollama</CardTitle>
               <CardDescription>
-                Base URL may point at a machine on your LAN. Do not hardcode
-                localhost in application code.
+                Connect to Ollama on this computer or another machine on your
+                local network. Do not expose Ollama on the public internet — it
+                is typically unauthenticated.
               </CardDescription>
             </CardHeader>
             <CardContent>
@@ -529,7 +539,16 @@ export function SettingsView() {
                       value={baseUrl}
                       onChange={(e) => setBaseUrl(e.target.value)}
                       placeholder="http://127.0.0.1:11434"
+                      aria-describedby="ollama-url-help"
                     />
+                    <p
+                      id="ollama-url-help"
+                      className="text-xs text-muted-foreground"
+                    >
+                      A LAN address is supported. Only use hosts you trust —
+                      Starboard sends repository text to this URL for
+                      categorization and embeddings.
+                    </p>
                   </div>
                   <div className="flex flex-col gap-2">
                     <Label htmlFor="chat-model">Chat model</Label>
@@ -563,7 +582,8 @@ export function SettingsView() {
                     <p className="text-xs text-muted-foreground">
                       Must match the embedding model output size
                       (nomic-embed-text = 768). Changing this requires
-                      rebuilding the vector table.
+                      rebuilding the search index on the Status or General tabs,
+                      then building embeddings from the library.
                     </p>
                   </div>
                   <div className="flex items-start gap-2">

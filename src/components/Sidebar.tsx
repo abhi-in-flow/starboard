@@ -1,4 +1,5 @@
 import { BookMarked, FolderTree, LineChart, Settings } from "lucide-react";
+import { HealthStrip } from "@/components/HealthStrip";
 import { cn } from "@/lib/utils";
 import { type AppView, useUiStore } from "@/store/ui";
 
@@ -17,9 +18,9 @@ export function Sidebar() {
     <aside className="flex w-48 shrink-0 flex-col border-r border-sidebar-border bg-sidebar text-sidebar-foreground">
       <div className="border-b border-sidebar-border px-4 py-5">
         <p className="text-lg font-semibold tracking-tight">Starboard</p>
-        <p className="text-xs text-muted-foreground">GitHub stars, organized</p>
+        <p className="text-xs text-foreground/70">GitHub stars, organized</p>
       </div>
-      <nav className="flex flex-1 flex-col gap-1 p-2">
+      <nav className="flex flex-1 flex-col gap-1 p-2" aria-label="Primary">
         {navItems.map((item) => {
           const Icon = item.icon;
           const active = view === item.id;
@@ -28,6 +29,7 @@ export function Sidebar() {
               key={item.id}
               type="button"
               onClick={() => setView(item.id)}
+              aria-current={active ? "page" : undefined}
               className={cn(
                 "flex items-center gap-2 rounded-md px-3 py-2 text-sm transition-colors",
                 active
@@ -41,6 +43,7 @@ export function Sidebar() {
           );
         })}
       </nav>
+      <HealthStrip />
     </aside>
   );
 }
