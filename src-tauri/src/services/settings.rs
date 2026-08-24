@@ -227,7 +227,11 @@ mod tests {
         assert_eq!(updated.embed_dimension, 1024);
         assert!(updated.embeddings_need_rebuild);
         assert!(!updated.auto_categorize_after_sync);
-        assert!(!get_settings(&conn).expect("reload").auto_categorize_after_sync);
+        assert!(
+            !get_settings(&conn)
+                .expect("reload")
+                .auto_categorize_after_sync
+        );
     }
 
     #[test]
