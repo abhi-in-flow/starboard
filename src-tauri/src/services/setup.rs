@@ -183,6 +183,7 @@ mod tests {
                 ollama_chat_model: Some("qwen3:14b".into()),
                 ollama_embed_model: None,
                 embed_dimension: None,
+                auto_categorize_after_sync: None,
             },
         )
         .expect("ollama settings");

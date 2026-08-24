@@ -163,21 +163,6 @@ pub fn clear_github_username(conn: &Connection) -> AppResult<()> {
     Ok(())
 }
 
-pub fn get_onboarding_completed(conn: &Connection) -> AppResult<bool> {
-    Ok(matches!(
-        get_value(conn, KEY_ONBOARDING_COMPLETED)?.as_deref(),
-        Some("true") | Some("1")
-    ))
-}
-
-pub fn set_onboarding_completed(conn: &Connection, completed: bool) -> AppResult<()> {
-    set_value(
-        conn,
-        KEY_ONBOARDING_COMPLETED,
-        if completed { "true" } else { "false" },
-    )
-}
-
 pub fn get_value(conn: &Connection, key: &str) -> AppResult<Option<String>> {
     let mut stmt = conn.prepare("SELECT value FROM settings WHERE key = ?1")?;
     let mut rows = stmt.query([key])?;

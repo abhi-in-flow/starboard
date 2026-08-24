@@ -212,7 +212,10 @@ export function LibraryView() {
                 selectedId={selectedRepoId}
                 onSelect={setSelectedRepoId}
                 onEndReached={() => {
-                  if (reposQuery.hasNextPage && !reposQuery.isFetchingNextPage) {
+                  if (
+                    reposQuery.hasNextPage &&
+                    !reposQuery.isFetchingNextPage
+                  ) {
                     void reposQuery.fetchNextPage();
                   }
                 }}
