@@ -1,4 +1,5 @@
 pub mod auth;
+pub mod backup;
 pub mod categorize;
 pub mod embed;
 pub mod insights;

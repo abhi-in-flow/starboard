@@ -1,3 +1,4 @@
+pub mod backup;
 pub mod categories;
 pub mod categorizer;
 pub mod embed;

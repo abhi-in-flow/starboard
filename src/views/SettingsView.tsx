@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useEffect, useState } from "react";
+import { DataBackupCard } from "@/components/settings/DataBackupCard";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -97,11 +98,12 @@ function StatusTab() {
     return null;
   }
 
-  const { embeddings: emb, categorization: cat } = data;
+  const { embeddings: emb, categorization: cat, data: dataPanel } = data;
   const coveragePct = Math.round(emb.coverage * 100);
 
   return (
     <div className="flex flex-col gap-6">
+      <DataBackupCard data={dataPanel} />
       <Card>
         <CardHeader>
           <CardTitle>Embeddings</CardTitle>

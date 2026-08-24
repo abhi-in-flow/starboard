@@ -559,7 +559,7 @@ pub struct IntegrityReport {
     pub checked_at: String,
 }
 
-/// Admin overview: embeddings + categorization panels (Settings → Status).
+/// Admin overview: embeddings + categorization + local data safety.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SystemStatus {
@@ -567,6 +567,48 @@ pub struct SystemStatus {
     pub categorization: CategorizationPanel,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub integrity: Option<IntegrityReport>,
+    pub data: DataPanel,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DataPanel {
+    pub db_path: String,
+    pub last_backup_path: Option<String>,
+    pub last_backup_at: Option<String>,
+    pub last_backup_ok: Option<bool>,
+    pub last_restore_at: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BackupValidation {
+    pub ok: bool,
+    pub path: String,
+    pub schema_version: i64,
+    pub repo_count: i64,
+    pub category_count: i64,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BackupResult {
+    pub path: String,
+    pub created_at: String,
+    pub schema_version: i64,
+    pub repo_count: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RestoreResult {
+    pub path: String,
+    pub restored_at: String,
+    pub schema_version: i64,
+    pub migrated: bool,
+    pub pre_restore_backup_path: String,
+    pub repo_count: i64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

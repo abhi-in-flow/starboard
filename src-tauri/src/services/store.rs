@@ -51,6 +51,31 @@ pub fn register_sqlite_vec() {
     });
 }
 
+/// Number of applied `M::up` migrations (001 + 002 + 003 + 004).
+pub const CURRENT_SCHEMA_VERSION: i64 = 4;
+/// Oldest Starboard schema a backup may restore (migration 001 only).
+pub const MIN_SUPPORTED_SCHEMA_VERSION: i64 = 1;
+
+pub fn migrations() -> Migrations<'static> {
+    Migrations::new(vec![
+        M::up(MIGRATION_001),
+        M::up(MIGRATION_002),
+        M::up(MIGRATION_003),
+        M::up(MIGRATION_004),
+    ])
+}
+
+/// Apply durability PRAGMAs, numbered migrations, embeddings table, and
+/// hardening post-open repairs. Used on live open and after restore.
+pub fn migrate_conn(conn: &mut Connection) -> AppResult<()> {
+    configure_connection(conn)?;
+    migrations().to_latest(conn)?;
+    ensure_embeddings_table(conn)?;
+    reconcile_orphaned_sync_logs(conn)?;
+    backfill_document_hashes(conn)?;
+    Ok(())
+}
+
 pub fn open_and_migrate(db_path: &PathBuf) -> AppResult<Connection> {
     register_sqlite_vec();
 
@@ -60,22 +85,7 @@ pub fn open_and_migrate(db_path: &PathBuf) -> AppResult<Connection> {
     }
 
     let mut conn = Connection::open(db_path)?;
-    configure_connection(&conn)?;
-
-    let migrations = Migrations::new(vec![
-        M::up(MIGRATION_001),
-        M::up(MIGRATION_002),
-        M::up(MIGRATION_003),
-        M::up(MIGRATION_004),
-    ]);
-    migrations.to_latest(&mut conn)?;
-
-    // Ensure vec0 dimension matches the current settings value (handles rebuild after
-    // a settings change that already cleared meta + dropped the table).
-    ensure_embeddings_table(&conn)?;
-    reconcile_orphaned_sync_logs(&conn)?;
-    backfill_document_hashes(&conn)?;
-
+    migrate_conn(&mut conn)?;
     Ok(conn)
 }
 
@@ -245,6 +255,17 @@ where
         .lock()
         .map_err(|_| AppError::db("database lock poisoned"))?;
     f(&conn)
+}
+
+pub fn with_conn_mut<T, F>(state: &State<'_, DbState>, f: F) -> AppResult<T>
+where
+    F: FnOnce(&mut Connection) -> AppResult<T>,
+{
+    let mut conn = state
+        .0
+        .lock()
+        .map_err(|_| AppError::db("database lock poisoned"))?;
+    f(&mut conn)
 }
 
 #[cfg(test)]
