@@ -1,5 +1,7 @@
-use regex::Regex;
 use std::sync::OnceLock;
+
+use log::{Level, LevelFilter, Log, Metadata, Record};
+use regex::Regex;
 
 /// Redact Authorization headers, bearer tokens, and common GitHub PAT shapes.
 pub fn scrub_log_line(line: &str) -> String {
@@ -23,16 +25,68 @@ pub fn scrub_log_line(line: &str) -> String {
     out
 }
 
-/// Single sink for runtime logs. Every line is scrubbed before it reaches stderr.
-pub fn log_line(line: impl AsRef<str>) {
-    eprintln!("{}", scrub_log_line(line.as_ref()));
+/// Format a `log` record and scrub secrets before the line reaches any sink.
+pub fn format_record(record: &Record<'_>) -> String {
+    scrub_log_line(&format!(
+        "[{}] {}: {}",
+        record.level(),
+        record.target(),
+        record.args()
+    ))
 }
 
-/// Timing traces stay off in release builds so they cannot leak into shipped logs.
-pub fn debug_timing(line: impl AsRef<str>) {
-    if cfg!(debug_assertions) {
-        log_line(line);
+struct ScrubbedLogger;
+
+impl Log for ScrubbedLogger {
+    fn enabled(&self, metadata: &Metadata<'_>) -> bool {
+        metadata.level()
+            <= if cfg!(debug_assertions) {
+                Level::Debug
+            } else {
+                Level::Info
+            }
     }
+
+    fn log(&self, record: &Record<'_>) {
+        if !self.enabled(record.metadata()) {
+            return;
+        }
+        let line = format_record(record);
+        let _ = std::io::Write::write_all(&mut std::io::stderr(), format!("{line}\n").as_bytes());
+    }
+
+    fn flush(&self) {}
+}
+
+static LOGGER: ScrubbedLogger = ScrubbedLogger;
+
+/// Install the scrubbed stderr logger and a panic hook that never prints raw PATs.
+/// Safe to call more than once.
+pub fn init_logger() {
+    static INIT: OnceLock<()> = OnceLock::new();
+    INIT.get_or_init(|| {
+        let max = if cfg!(debug_assertions) {
+            LevelFilter::Debug
+        } else {
+            LevelFilter::Info
+        };
+        if log::set_logger(&LOGGER).is_ok() {
+            log::set_max_level(max);
+        }
+        install_panic_hook();
+    });
+}
+
+fn install_panic_hook() {
+    std::panic::set_hook(Box::new(|info| {
+        let scrubbed = scrub_log_line(&info.to_string());
+        log::error!("panic: {scrubbed}");
+    }));
+}
+
+/// Timing traces stay Debug so they are off in release (`LevelFilter::Info`).
+pub fn debug_timing(line: impl AsRef<str>) {
+    log::debug!("{}", line.as_ref());
 }
 
 #[cfg(test)]
@@ -67,5 +121,31 @@ mod tests {
     fn leaves_unrelated_lines_alone() {
         let line = "sync complete: 42 repos";
         assert_eq!(scrub_log_line(line), line);
+    }
+
+    #[test]
+    fn format_record_scrubs_pat_in_args() {
+        let record = Record::builder()
+            .args(format_args!(
+                "Authorization: Bearer ghp_supersecrettoken123 extra"
+            ))
+            .level(Level::Info)
+            .target("starboard::sync")
+            .build();
+        let line = format_record(&record);
+        assert!(line.starts_with("[INFO] starboard::sync:"));
+        assert!(
+            !line.contains("ghp_supersecrettoken123"),
+            "token leaked via logger format: {line}"
+        );
+        assert!(line.contains("[REDACTED]"));
+    }
+
+    #[test]
+    fn panic_payload_is_scrubbed() {
+        let raw = "panicked at Authorization: Bearer ghp_supersecrettoken123";
+        let scrubbed = scrub_log_line(raw);
+        assert!(!scrubbed.contains("ghp_supersecrettoken123"));
+        assert!(scrubbed.contains("[REDACTED]"));
     }
 }
