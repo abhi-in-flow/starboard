@@ -44,13 +44,8 @@ pub fn write_library_export(
     path: String,
     format: String,
 ) -> AppResult<()> {
-    if path.trim().is_empty() {
-        return Err(crate::error::AppError::new(
-            "validation_error",
-            "export path is required",
-        ));
-    }
     let format = format.to_ascii_lowercase();
+    let _validated = insights::validate_export_path(path.trim(), Some(&format))?;
     let content = store::with_conn(&state, |conn| {
         let export = insights::export_library(conn)?;
         match format.as_str() {

@@ -12,6 +12,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { formatRelative } from "@/lib/format";
 import {
+  checkDbIntegrity,
   connectGithub,
   disconnectGithub,
   getAuthStatus,
@@ -21,7 +22,7 @@ import {
   updateSettings,
 } from "@/lib/tauri";
 import { cn } from "@/lib/utils";
-import type { AppError, CategoryNode } from "@/types";
+import type { AppError, CategoryNode, IntegrityReport } from "@/types";
 
 function errorMessage(err: unknown): string {
   if (err && typeof err === "object" && "message" in err) {
@@ -66,6 +67,12 @@ function CategoryCountList({
 }
 
 function StatusTab() {
+  const [integrity, setIntegrity] = useState<IntegrityReport | null>(null);
+  const integrityMutation = useMutation({
+    mutationFn: checkDbIntegrity,
+    onSuccess: setIntegrity,
+  });
+
   const statusQuery = useQuery({
     queryKey: ["systemStatus"],
     queryFn: getSystemStatus,
@@ -167,6 +174,48 @@ function StatusTab() {
             </p>
             <CategoryCountList nodes={cat.categories} />
           </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Database integrity</CardTitle>
+          <CardDescription>
+            SQLite integrity_check and foreign-key check. This is not a
+            backup/restore.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="flex flex-col gap-3 text-sm">
+          <Button
+            type="button"
+            variant="outline"
+            className="w-fit"
+            disabled={integrityMutation.isPending}
+            onClick={() => integrityMutation.mutate()}
+          >
+            {integrityMutation.isPending ? "Checking…" : "Check database"}
+          </Button>
+          {integrityMutation.isError ? (
+            <p className="text-destructive" role="alert">
+              {errorMessage(integrityMutation.error)}
+            </p>
+          ) : null}
+          {integrity ? (
+            <div className="grid grid-cols-2 gap-x-4 gap-y-2">
+              <span className="text-muted-foreground">Result</span>
+              <span className="font-medium">
+                {integrity.ok ? "OK" : "Issues found"}
+              </span>
+              <span className="text-muted-foreground">Integrity</span>
+              <span className="font-medium">{integrity.integrity}</span>
+              <span className="text-muted-foreground">FK violations</span>
+              <span className="font-medium tabular-nums">
+                {integrity.foreignKeyViolations}
+              </span>
+              <span className="text-muted-foreground">Checked</span>
+              <span className="font-medium">{integrity.checkedAt}</span>
+            </div>
+          ) : null}
         </CardContent>
       </Card>
     </div>

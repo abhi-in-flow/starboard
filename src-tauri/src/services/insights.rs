@@ -1,7 +1,7 @@
 //! Insights aggregations over `starred_at` (includes soft-deleted / unstarred rows).
 
 use std::collections::{BTreeMap, HashMap, HashSet};
-use std::path::Path;
+use std::path::{Component, PathBuf};
 
 use rusqlite::Connection;
 use time::format_description::well_known::Rfc3339;
@@ -69,16 +69,78 @@ pub fn export_library(conn: &Connection) -> AppResult<LibraryExport> {
 }
 
 pub fn write_export_file(path: &str, content: &str) -> AppResult<()> {
-    let p = Path::new(path);
-    if let Some(parent) = p.parent() {
-        if !parent.as_os_str().is_empty() {
-            std::fs::create_dir_all(parent).map_err(|e| {
-                AppError::new("io_error", format!("failed to create export directory: {e}"))
-            })?;
+    let p = validate_export_path(path, None)?;
+    std::fs::write(&p, content)
+        .map_err(|e| AppError::new("io_error", format!("failed to write export: {e}")))
+}
+
+/// Only absolute, non-traversing paths with an expected export extension.
+/// Parent directory must already exist (save-dialog contract).
+pub fn validate_export_path(path: &str, format: Option<&str>) -> AppResult<PathBuf> {
+    let trimmed = path.trim();
+    if trimmed.is_empty() {
+        return Err(AppError::new("validation_error", "export path is required"));
+    }
+    let p = PathBuf::from(trimmed);
+    if !p.is_absolute() {
+        return Err(AppError::new(
+            "validation_error",
+            "export path must be an absolute path chosen in the save dialog",
+        ));
+    }
+    if p.components().any(|c| matches!(c, Component::ParentDir)) {
+        return Err(AppError::new(
+            "validation_error",
+            "export path must not contain '..'",
+        ));
+    }
+    let ext = p
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    let expected = format.map(|f| f.to_ascii_lowercase());
+    match expected.as_deref() {
+        Some("markdown") | Some("md") => {
+            if ext != "md" && ext != "markdown" {
+                return Err(AppError::new(
+                    "validation_error",
+                    "markdown export must use a .md or .markdown extension",
+                ));
+            }
+        }
+        Some("json") => {
+            if ext != "json" {
+                return Err(AppError::new(
+                    "validation_error",
+                    "JSON export must use a .json extension",
+                ));
+            }
+        }
+        Some(other) => {
+            return Err(AppError::new(
+                "validation_error",
+                format!("unknown export format: {other}"),
+            ));
+        }
+        None => {
+            if ext != "md" && ext != "markdown" && ext != "json" {
+                return Err(AppError::new(
+                    "validation_error",
+                    "export path must end in .md, .markdown, or .json",
+                ));
+            }
         }
     }
-    std::fs::write(p, content)
-        .map_err(|e| AppError::new("io_error", format!("failed to write export: {e}")))
+    if let Some(parent) = p.parent() {
+        if !parent.as_os_str().is_empty() && !parent.exists() {
+            return Err(AppError::new(
+                "validation_error",
+                "export directory does not exist — choose a path in the save dialog",
+            ));
+        }
+    }
+    Ok(p)
 }
 
 fn utc_offset(minutes: Option<i32>) -> UtcOffset {
@@ -86,10 +148,7 @@ fn utc_offset(minutes: Option<i32>) -> UtcOffset {
     UtcOffset::from_whole_seconds(mins.saturating_mul(60)).unwrap_or(UtcOffset::UTC)
 }
 
-fn resolve_range(
-    range: Option<&InsightsDateRange>,
-    now: OffsetDateTime,
-) -> AppResult<RangeBounds> {
+fn resolve_range(range: Option<&InsightsDateRange>, now: OffsetDateTime) -> AppResult<RangeBounds> {
     let Some(range) = range else {
         return Ok(RangeBounds {
             start: None,
@@ -115,11 +174,7 @@ fn resolve_range(
             end: Some(now),
         }),
         "custom" => {
-            let start = range
-                .start
-                .as_deref()
-                .map(parse_bound)
-                .transpose()?;
+            let start = range.start.as_deref().map(parse_bound).transpose()?;
             let end = range.end.as_deref().map(parse_bound).transpose()?;
             Ok(RangeBounds { start, end })
         }
@@ -217,9 +272,7 @@ fn build_meta(starred: &[StarredRow], bounds: &RangeBounds) -> InsightsMeta {
         total_stars,
         span_days,
         short_history,
-        range_start: bounds
-            .start
-            .and_then(|d| d.format(&Rfc3339).ok()),
+        range_start: bounds.start.and_then(|d| d.format(&Rfc3339).ok()),
         range_end: bounds.end.and_then(|d| d.format(&Rfc3339).ok()),
     }
 }
@@ -314,9 +367,7 @@ fn primary_top_level_map(conn: &Connection) -> AppResult<HashMap<i64, String>> {
     Ok(map)
 }
 
-fn primary_category_detail(
-    conn: &Connection,
-) -> AppResult<HashMap<i64, (String, Option<String>)>> {
+fn primary_category_detail(conn: &Connection) -> AppResult<HashMap<i64, (String, Option<String>)>> {
     // Returns (top_level, subcategory_name) for primary assignment.
     let mut stmt = conn.prepare(
         "SELECT rc.repo_id,
@@ -450,9 +501,7 @@ fn quarter_key(local: OffsetDateTime) -> String {
     format!("{:04}-Q{q}", local.year())
 }
 
-fn share_points_from_periods(
-    by_period: BTreeMap<String, HashMap<String, i64>>,
-) -> Vec<SharePoint> {
+fn share_points_from_periods(by_period: BTreeMap<String, HashMap<String, i64>>) -> Vec<SharePoint> {
     let mut out = Vec::new();
     for (period, counts) in by_period {
         let total: i64 = counts.values().sum();
@@ -579,7 +628,12 @@ fn build_fun_facts(
         .max_by(|a, b| a.1.cmp(b.1).then_with(|| a.0.cmp(b.0)))
         .map(|(d, c)| {
             (
-                Some(format!("{:04}-{:02}-{:02}", d.year(), d.month() as u8, d.day())),
+                Some(format!(
+                    "{:04}-{:02}-{:02}",
+                    d.year(),
+                    d.month() as u8,
+                    d.day()
+                )),
                 *c,
             )
         })
@@ -686,8 +740,7 @@ fn push_md_repo(md: &mut String, repo: &ExportRepo) {
 
 fn export_json(conn: &Connection) -> AppResult<String> {
     let tree = load_export_tree(conn)?;
-    serde_json::to_string_pretty(&tree)
-        .map_err(|e| AppError::new("serialize_error", e.to_string()))
+    serde_json::to_string_pretty(&tree).map_err(|e| AppError::new("serialize_error", e.to_string()))
 }
 
 #[derive(Debug, Serialize)]
@@ -768,10 +821,8 @@ fn load_export_tree(conn: &Connection) -> AppResult<ExportTree> {
         ))
     })?;
 
-    let cat_parent: HashMap<i64, Option<i64>> = cat_rows
-        .iter()
-        .map(|(id, _, pid)| (*id, *pid))
-        .collect();
+    let cat_parent: HashMap<i64, Option<i64>> =
+        cat_rows.iter().map(|(id, _, pid)| (*id, *pid)).collect();
     let cat_name: HashMap<i64, String> = cat_rows
         .iter()
         .map(|(id, name, _)| (*id, name.clone()))
@@ -1066,11 +1117,7 @@ mod tests {
             },
         )
         .expect("utc");
-        let cell = utc
-            .heatmap
-            .iter()
-            .find(|c| c.count > 0)
-            .expect("utc cell");
+        let cell = utc.heatmap.iter().find(|c| c.count > 0).expect("utc cell");
         assert_eq!(cell.day_of_week, 2); // Wednesday
         assert_eq!(cell.hour, 1);
 
@@ -1082,11 +1129,7 @@ mod tests {
             },
         )
         .expect("pst");
-        let cell = pst
-            .heatmap
-            .iter()
-            .find(|c| c.count > 0)
-            .expect("pst cell");
+        let cell = pst.heatmap.iter().find(|c| c.count > 0).expect("pst cell");
         assert_eq!(cell.day_of_week, 1); // Tuesday
         assert_eq!(cell.hour, 17);
     }
@@ -1223,7 +1266,15 @@ mod tests {
             let at = (recent + Duration::days(days))
                 .format(&Rfc3339)
                 .expect("fmt");
-            insert_repo(&conn, id, &format!("ai_new{i}"), &at, Some("Rust"), false, None);
+            insert_repo(
+                &conn,
+                id,
+                &format!("ai_new{i}"),
+                &at,
+                Some("Rust"),
+                false,
+                None,
+            );
             assign(&conn, id, 1, "llm");
         }
 
@@ -1304,7 +1355,10 @@ mod tests {
         assert!(dash.meta.short_history);
         assert_eq!(dash.meta.total_stars, 1);
         assert_eq!(dash.fun_facts.longest_streak_days, 1);
-        assert!(dash.interest_metrics.iter().all(|m| m.lifetime_velocity.is_finite()));
+        assert!(dash
+            .interest_metrics
+            .iter()
+            .all(|m| m.lifetime_velocity.is_finite()));
         assert!(!dash.timeline.weekly.is_empty());
     }
 
@@ -1411,10 +1465,7 @@ mod tests {
             Some("2024-01-10")
         );
         assert_eq!(dash.fun_facts.first_star_repo.as_deref(), Some("owner/a"));
-        assert_eq!(
-            dash.fun_facts.oldest_repo_name.as_deref(),
-            Some("owner/d")
-        );
+        assert_eq!(dash.fun_facts.oldest_repo_name.as_deref(), Some("owner/d"));
     }
 
     #[test]
@@ -1435,10 +1486,7 @@ mod tests {
         let parsed: serde_json::Value = serde_json::from_str(&export.json).expect("json");
         assert!(parsed["categories"].is_array());
         let cats = parsed["categories"].as_array().unwrap();
-        let ai = cats
-            .iter()
-            .find(|c| c["name"] == "AI/LLM")
-            .expect("ai cat");
+        let ai = cats.iter().find(|c| c["name"] == "AI/LLM").expect("ai cat");
         assert!(ai["subcategories"]
             .as_array()
             .unwrap()
@@ -1448,18 +1496,31 @@ mod tests {
 
     #[test]
     fn write_export_file_roundtrip() {
-        let dir = std::env::temp_dir().join(format!(
-            "starboard_export_{}",
+        let path = std::env::temp_dir().join(format!(
+            "starboard_export_{}.md",
             SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .unwrap()
                 .as_nanos()
         ));
-        let path = dir.join("out.md");
         write_export_file(path.to_str().unwrap(), "# hi\n").expect("write");
         let got = std::fs::read_to_string(&path).expect("read");
         assert_eq!(got, "# hi\n");
-        let _ = std::fs::remove_dir_all(dir);
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn export_path_rejects_traversal_and_bad_extension() {
+        let err = validate_export_path("../secret.json", Some("json")).unwrap_err();
+        assert_eq!(err.code, "validation_error");
+        let abs = std::env::temp_dir().join("notes.txt");
+        let err = validate_export_path(abs.to_str().unwrap(), Some("markdown")).unwrap_err();
+        assert!(err.message.contains("extension"));
+        let sneaky = std::env::temp_dir().join("foo/../out.md");
+        if sneaky.to_string_lossy().contains("..") {
+            let err = validate_export_path(sneaky.to_str().unwrap(), Some("md")).unwrap_err();
+            assert!(err.message.contains(".."));
+        }
     }
 
     #[test]

@@ -3,6 +3,10 @@ mod error;
 mod models;
 mod services;
 
+// Keep sanitizer reachable from the library crate (used by README UI + tests).
+#[allow(unused_imports)]
+pub use services::sanitize::is_safe_markdown_url;
+
 use tauri::Manager;
 
 use commands::{auth, categorize, embed, insights, repos, settings, status, sync};
@@ -39,6 +43,8 @@ pub fn run() {
             sync::start_sync,
             sync::resume_readme_queue,
             sync::get_sync_status,
+            sync::cancel_sync,
+            sync::cancel_readme_queue,
             repos::list_repos,
             repos::search_repos,
             repos::get_repo,
@@ -50,16 +56,19 @@ pub fn run() {
             categorize::update_taxonomy,
             categorize::commit_taxonomy,
             categorize::start_assignment,
+            categorize::cancel_assignment,
             categorize::get_categorize_status,
             categorize::set_repo_category,
             categorize::recategorize_repo,
             embed::get_embed_status,
             embed::start_embedding,
+            embed::cancel_embedding,
             insights::get_insights,
             insights::get_interest_drift_drilldown,
             insights::get_library_export,
             insights::write_library_export,
             status::get_system_status,
+            status::check_db_integrity,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
