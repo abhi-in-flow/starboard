@@ -269,12 +269,12 @@ Each phase is a self-contained handoff unit with acceptance criteria. Do not sta
 - Taxonomy generation flow with review/edit screen (rename, merge, delete, add before commit).
 - Batched assignment pipeline with structured outputs, progress events, resumability.
 - Category tree sidebar goes live: counts per node, click-to-filter, drag repo → category (manual override), detail-panel re-categorize + manual picker.
-- Categories nav menu for generate / edit-in-place / commit / assign. Post-sync auto-assign deferred to harden pass.
+- Categories nav menu for generate / edit-in-place / commit / assign. Post-sync auto-assign deferred to harden pass (shipped in 0.9.0, see Post-v2 increments).
 
 **Acceptance criteria**
 - Full library categorized end-to-end; zero silent taxonomy mutations; manual overrides survive a full re-categorization run; Ollama offline leaves the rest of the app fully functional.
 
-### Phase 4 — Vector & Hybrid Search (v2a) (agent-days: ~2)
+### Phase 4 — Vector & Hybrid Search (v2a) (agent-days: ~2) — **done**
 
 **Deliverables**
 - sqlite-vec extension loading; migration 002 adds `repo_embeddings` (dimension from settings).
@@ -284,7 +284,7 @@ Each phase is a self-contained handoff unit with acceptance criteria. Do not sta
 **Acceptance criteria**
 - "local llm agent memory" surfaces relevant repos that keyword search misses; hybrid query round-trip <500 ms excluding the embedding call; missing embeddings fall back to keyword-only with a hint.
 
-### Phase 5 — Insights Dashboard (v2b) (agent-days: ~2–3)
+### Phase 5 — Insights Dashboard (v2b) (agent-days: ~2–3) — **done**
 
 **Deliverables**
 - Insights tab with all six views from §7 (Recharts), date-range selector, per-category drill-down.
@@ -295,8 +295,22 @@ Each phase is a self-contained handoff unit with acceptance criteria. Do not sta
 **Acceptance criteria**
 - Charts reconcile with raw SQL spot-checks; date-range filtering applies across all views; empty/short-history states handled gracefully.
 
-### Backlog (post-v2, not scheduled)
-- Notes/tags per repo; duplicate-interest detector ("you starred 6 similar RAG frameworks"); stale-star review mode; GitHub Lists write-back via browser automation (explicitly out of scope for now); auto-sync scheduler.
+### Post-v2 increments — **done**
+
+See `CHANGELOG.md` for details.
+
+- 0.7.0 — Relevance badges and sorted-by-relevance indicator for Semantic/Hybrid; Settings Status tab.
+- 0.8.0 — Production hardening: SQLite durability PRAGMAs + transactional writes (migration 003), request timeouts, bounded rate-limit waits, cancellable jobs, paginated browse/search, scrubbed log sink, CSP, CI.
+- 0.9.0 — Auto-categorize new/uncategorized repos after sync (`auto_categorize_after_sync`, default on).
+- 0.10.0 — Guided first-run onboarding checklist (GitHub, sync, Ollama, taxonomy, embeddings).
+- 0.11.0 — Stale-star review queues with local Reviewed/Snooze state (migration 004); no GitHub write-back.
+- 0.12.0 — Consistent SQLite backup, validation, and restore with pre-restore safety copy (PAT excluded).
+- 0.13.x — UI/accessibility/performance polish: responsive layout, health strip, lazy-loaded views, keyboard fixes.
+
+Release signing, updater endpoint, and store listings remain externally blocked (see `docs/release-readiness.md`).
+
+### Backlog (not scheduled)
+- Notes/tags per repo; duplicate-interest detector ("you starred 6 similar RAG frameworks"); GitHub Lists write-back via browser automation (explicitly out of scope for now); auto-sync scheduler.
 
 ---
 
