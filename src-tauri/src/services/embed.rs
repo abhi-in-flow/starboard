@@ -685,6 +685,7 @@ mod tests {
                 ollama_chat_model: None,
                 ollama_embed_model: Some("nomic-embed-text".into()),
                 embed_dimension: None,
+                auto_categorize_after_sync: None,
             },
         )
         .expect("settings");
@@ -781,6 +782,7 @@ mod tests {
                 ollama_chat_model: None,
                 ollama_embed_model: Some("nomic-embed-text".into()),
                 embed_dimension: None,
+                auto_categorize_after_sync: None,
             },
         )
         .expect("settings");
@@ -839,6 +841,7 @@ mod tests {
                 ollama_chat_model: None,
                 ollama_embed_model: Some("nomic-embed-text".into()),
                 embed_dimension: None,
+                auto_categorize_after_sync: None,
             },
         )
         .expect("settings");

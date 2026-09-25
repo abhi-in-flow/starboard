@@ -1,3 +1,4 @@
+pub mod backup;
 pub mod categories;
 pub mod categorizer;
 pub mod embed;
@@ -9,10 +10,12 @@ pub mod jobs;
 pub mod logging;
 pub mod ollama;
 pub mod repos;
+pub mod review;
 pub mod sanitize;
 pub mod search;
 pub mod secrets;
 pub mod settings;
+pub mod setup;
 pub mod status;
 pub mod store;
 pub mod sync;

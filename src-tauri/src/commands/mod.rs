@@ -1,8 +1,11 @@
 pub mod auth;
+pub mod backup;
 pub mod categorize;
 pub mod embed;
 pub mod insights;
 pub mod repos;
+pub mod review;
 pub mod settings;
+pub mod setup;
 pub mod status;
 pub mod sync;

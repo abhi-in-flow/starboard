@@ -2,16 +2,18 @@ use rusqlite::{Connection, OptionalExtension};
 
 use crate::error::AppResult;
 use crate::models::{CategorizationPanel, EmbeddingsPanel, SystemStatus};
+use crate::services::backup;
 use crate::services::categories;
 use crate::services::embed;
 use crate::services::settings;
 
 /// Aggregate embeddings + categorization admin stats for the Settings Status tab.
-pub fn get_system_status(conn: &Connection) -> AppResult<SystemStatus> {
+pub fn get_system_status(conn: &Connection, db_path: &str) -> AppResult<SystemStatus> {
     Ok(SystemStatus {
         embeddings: embeddings_panel(conn)?,
         categorization: categorization_panel(conn)?,
         integrity: None,
+        data: backup::data_panel(conn, db_path)?,
     })
 }
 
@@ -77,6 +79,7 @@ fn categorization_panel(conn: &Connection) -> AppResult<CategorizationPanel> {
         |row| row.get(0),
     )?;
     let categories = categories::list_category_tree(conn)?;
+    let app_settings = settings::get_settings(conn)?;
 
     Ok(CategorizationPanel {
         total_repos,
@@ -84,6 +87,7 @@ fn categorization_panel(conn: &Connection) -> AppResult<CategorizationPanel> {
         uncategorized_repos,
         llm_assignments,
         manual_assignments,
+        auto_categorize_after_sync: app_settings.auto_categorize_after_sync,
         categories,
     })
 }
@@ -132,7 +136,8 @@ mod tests {
     #[test]
     fn empty_db_is_safe() {
         let conn = test_conn();
-        let status = get_system_status(&conn).expect("status");
+        let status = get_system_status(&conn, "/tmp/starboard.db").expect("status");
+        assert_eq!(status.data.db_path, "/tmp/starboard.db");
         assert_eq!(status.embeddings.total_repos, 0);
         assert_eq!(status.embeddings.embedded_repos, 0);
         assert_eq!(status.embeddings.stale_repos, 0);
@@ -144,6 +149,7 @@ mod tests {
         assert_eq!(status.categorization.uncategorized_repos, 0);
         assert_eq!(status.categorization.llm_assignments, 0);
         assert_eq!(status.categorization.manual_assignments, 0);
+        assert!(status.categorization.auto_categorize_after_sync);
         assert!(status.categorization.categories.is_empty());
     }
 
@@ -197,7 +203,7 @@ mod tests {
         )
         .expect("assign");
 
-        let status = get_system_status(&conn).expect("status");
+        let status = get_system_status(&conn, "/tmp/starboard.db").expect("status");
 
         assert_eq!(status.embeddings.total_repos, 3);
         assert_eq!(status.embeddings.embedded_repos, 2);
@@ -214,6 +220,7 @@ mod tests {
         assert_eq!(status.categorization.uncategorized_repos, 1);
         assert_eq!(status.categorization.llm_assignments, 1);
         assert_eq!(status.categorization.manual_assignments, 1);
+        assert!(status.categorization.auto_categorize_after_sync);
 
         let ai = status
             .categorization

@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { DataBackupCard } from "@/components/settings/DataBackupCard";
 import { Button } from "@/components/ui/button";
 import {
   Card,
@@ -8,6 +9,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { formatRelative } from "@/lib/format";
@@ -19,9 +21,12 @@ import {
   getSettings,
   getSystemStatus,
   rebuildEmbeddingsTable,
+  setOnboardingCompleted,
   updateSettings,
 } from "@/lib/tauri";
+import { usePrefersReducedMotion } from "@/lib/useMediaQuery";
 import { cn } from "@/lib/utils";
+import { useUiStore } from "@/store/ui";
 import type { AppError, CategoryNode, IntegrityReport } from "@/types";
 
 function errorMessage(err: unknown): string {
@@ -94,11 +99,12 @@ function StatusTab() {
     return null;
   }
 
-  const { embeddings: emb, categorization: cat } = data;
+  const { embeddings: emb, categorization: cat, data: dataPanel } = data;
   const coveragePct = Math.round(emb.coverage * 100);
 
   return (
     <div className="flex flex-col gap-6">
+      <DataBackupCard data={dataPanel} />
       <Card>
         <CardHeader>
           <CardTitle>Embeddings</CardTitle>
@@ -136,8 +142,8 @@ function StatusTab() {
             </p>
           ) : null}
           <p className="text-xs text-muted-foreground">
-            To (re)build vectors, use Build embeddings from the Library toolbar
-            when Ollama is online.
+            To rebuild search embeddings, use Build embeddings from the Library
+            toolbar when Ollama is reachable.
           </p>
         </CardContent>
       </Card>
@@ -166,6 +172,12 @@ function StatusTab() {
             <span className="text-muted-foreground">Manual assignments</span>
             <span className="font-medium tabular-nums">
               {cat.manualAssignments}
+            </span>
+            <span className="text-muted-foreground">
+              Auto-categorize after sync
+            </span>
+            <span className="font-medium">
+              {cat.autoCategorizeAfterSync ? "On" : "Off"}
             </span>
           </div>
           <div>
@@ -224,7 +236,12 @@ function StatusTab() {
 
 export function SettingsView() {
   const queryClient = useQueryClient();
-  const [tab, setTab] = useState<"general" | "status">("general");
+  const tab = useUiStore((s) => s.settingsTab);
+  const setTab = useUiStore((s) => s.setSettingsTab);
+  const settingsSection = useUiStore((s) => s.settingsSection);
+  const setSettingsSection = useUiStore((s) => s.setSettingsSection);
+  const setView = useUiStore((s) => s.setView);
+  const reduceMotion = usePrefersReducedMotion();
   const [pat, setPat] = useState("");
   const [replacingToken, setReplacingToken] = useState(false);
   const [authError, setAuthError] = useState<string | null>(null);
@@ -232,6 +249,7 @@ export function SettingsView() {
   const [chatModel, setChatModel] = useState("");
   const [embedModel, setEmbedModel] = useState("");
   const [embedDimension, setEmbedDimension] = useState("768");
+  const [autoCategorize, setAutoCategorize] = useState(true);
   const [settingsSaved, setSettingsSaved] = useState(false);
 
   const authQuery = useQuery({
@@ -247,6 +265,7 @@ export function SettingsView() {
       setChatModel(settings.ollamaChatModel);
       setEmbedModel(settings.ollamaEmbedModel);
       setEmbedDimension(String(settings.embedDimension));
+      setAutoCategorize(settings.autoCategorizeAfterSync);
       return settings;
     },
   });
@@ -259,6 +278,7 @@ export function SettingsView() {
       setAuthError(null);
       queryClient.setQueryData(["authStatus"], status);
       void queryClient.invalidateQueries({ queryKey: ["settings"] });
+      void queryClient.invalidateQueries({ queryKey: ["setupStatus"] });
     },
     onError: (err) => {
       setAuthError(errorMessage(err));
@@ -272,6 +292,7 @@ export function SettingsView() {
       setReplacingToken(false);
       queryClient.setQueryData(["authStatus"], status);
       void queryClient.invalidateQueries({ queryKey: ["settings"] });
+      void queryClient.invalidateQueries({ queryKey: ["setupStatus"] });
     },
     onError: (err) => {
       setAuthError(errorMessage(err));
@@ -286,6 +307,7 @@ export function SettingsView() {
         ollamaChatModel: chatModel,
         ollamaEmbedModel: embedModel,
         embedDimension: Number.isFinite(parsed) ? parsed : undefined,
+        autoCategorizeAfterSync: autoCategorize,
       });
     },
     onSuccess: (settings) => {
@@ -295,6 +317,7 @@ export function SettingsView() {
       window.setTimeout(() => setSettingsSaved(false), 2000);
       void queryClient.invalidateQueries({ queryKey: ["embedStatus"] });
       void queryClient.invalidateQueries({ queryKey: ["systemStatus"] });
+      void queryClient.invalidateQueries({ queryKey: ["setupStatus"] });
     },
   });
 
@@ -309,8 +332,40 @@ export function SettingsView() {
       queryClient.setQueryData(["settings"], settings);
       void queryClient.invalidateQueries({ queryKey: ["embedStatus"] });
       void queryClient.invalidateQueries({ queryKey: ["systemStatus"] });
+      void queryClient.invalidateQueries({ queryKey: ["setupStatus"] });
     },
   });
+
+  const reopenGuideMutation = useMutation({
+    mutationFn: () => setOnboardingCompleted(false),
+    onSuccess: (status) => {
+      queryClient.setQueryData(["setupStatus"], status);
+      setView("library");
+    },
+  });
+
+  useEffect(() => {
+    if (!settingsSection) {
+      return;
+    }
+    const id =
+      settingsSection === "github" ? "settings-github" : "settings-ollama";
+    const section = document.getElementById(id);
+    section?.scrollIntoView({
+      behavior: reduceMotion ? "auto" : "smooth",
+      block: "start",
+    });
+    if (settingsSection === "github") {
+      window.setTimeout(() => {
+        document.getElementById("pat")?.focus();
+      }, 80);
+    } else {
+      window.setTimeout(() => {
+        document.getElementById("ollama-url")?.focus();
+      }, 80);
+    }
+    setSettingsSection(null);
+  }, [settingsSection, setSettingsSection, reduceMotion]);
 
   const auth = authQuery.data;
   const showPatForm = !auth?.connected || replacingToken;
@@ -321,14 +376,16 @@ export function SettingsView() {
       <div>
         <h1 className="text-2xl font-semibold tracking-tight">Settings</h1>
         <p className="text-sm text-muted-foreground">
-          Connect GitHub and configure the local Ollama endpoint.
+          Connect GitHub, choose an Ollama host, and review library health.
         </p>
       </div>
 
-      <div className="flex w-fit items-center rounded-lg border border-border p-0.5">
+      <fieldset className="m-0 flex w-fit items-center rounded-lg border border-border p-0.5">
+        <legend className="sr-only">Settings sections</legend>
         <Button
           type="button"
           size="sm"
+          aria-pressed={tab === "general"}
           variant={tab === "general" ? "secondary" : "ghost"}
           className={cn("h-8 px-3 text-xs")}
           onClick={() => setTab("general")}
@@ -338,6 +395,7 @@ export function SettingsView() {
         <Button
           type="button"
           size="sm"
+          aria-pressed={tab === "status"}
           variant={tab === "status" ? "secondary" : "ghost"}
           className={cn("h-8 px-3 text-xs")}
           onClick={() => {
@@ -347,18 +405,19 @@ export function SettingsView() {
         >
           Status
         </Button>
-      </div>
+      </fieldset>
 
       {tab === "status" ? (
         <StatusTab />
       ) : (
         <>
-          <Card>
+          <Card id="settings-github" tabIndex={-1} className="outline-none">
             <CardHeader>
               <CardTitle>GitHub</CardTitle>
               <CardDescription>
-                Personal access token is stored in the OS credential store and
-                never written to the database.
+                Your personal access token stays in the operating system
+                credential store. It is never written to the library database,
+                backups, or logs.
               </CardDescription>
             </CardHeader>
             <CardContent className="flex flex-col gap-4">
@@ -453,12 +512,13 @@ export function SettingsView() {
             </CardContent>
           </Card>
 
-          <Card>
+          <Card id="settings-ollama" tabIndex={-1} className="outline-none">
             <CardHeader>
               <CardTitle>Ollama</CardTitle>
               <CardDescription>
-                Base URL may point at a machine on your LAN. Do not hardcode
-                localhost in application code.
+                Connect to Ollama on this computer or another machine on your
+                local network. Do not expose Ollama on the public internet — it
+                is typically unauthenticated.
               </CardDescription>
             </CardHeader>
             <CardContent>
@@ -479,7 +539,16 @@ export function SettingsView() {
                       value={baseUrl}
                       onChange={(e) => setBaseUrl(e.target.value)}
                       placeholder="http://127.0.0.1:11434"
+                      aria-describedby="ollama-url-help"
                     />
+                    <p
+                      id="ollama-url-help"
+                      className="text-xs text-muted-foreground"
+                    >
+                      A LAN address is supported. Only use hosts you trust —
+                      Starboard sends repository text to this URL for
+                      categorization and embeddings.
+                    </p>
                   </div>
                   <div className="flex flex-col gap-2">
                     <Label htmlFor="chat-model">Chat model</Label>
@@ -513,8 +582,28 @@ export function SettingsView() {
                     <p className="text-xs text-muted-foreground">
                       Must match the embedding model output size
                       (nomic-embed-text = 768). Changing this requires
-                      rebuilding the vector table.
+                      rebuilding the search index on the Status or General tabs,
+                      then building embeddings from the library.
                     </p>
+                  </div>
+                  <div className="flex items-start gap-2">
+                    <Checkbox
+                      id="auto-categorize"
+                      checked={autoCategorize}
+                      onCheckedChange={(v) => setAutoCategorize(v === true)}
+                      className="mt-0.5"
+                    />
+                    <div className="flex flex-col gap-1">
+                      <Label htmlFor="auto-categorize">
+                        Auto-categorize after sync
+                      </Label>
+                      <p className="text-xs text-muted-foreground">
+                        On by default. After a successful sync and README fetch,
+                        assign only new uncategorized repos with your committed
+                        taxonomy. Manual overrides are never changed. Silent
+                        no-op if Ollama is offline or no taxonomy is committed.
+                      </p>
+                    </div>
                   </div>
                   {needRebuild ? (
                     <div className="rounded-md border border-border bg-muted/40 p-3 text-sm">
@@ -562,6 +651,26 @@ export function SettingsView() {
                   </div>
                 </form>
               )}
+            </CardContent>
+          </Card>
+
+          <Card>
+            <CardHeader>
+              <CardTitle>Setup guide</CardTitle>
+              <CardDescription>
+                Reopen the first-run checklist. Progress comes from your current
+                GitHub, sync, category, and embedding status.
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <Button
+                type="button"
+                variant="outline"
+                disabled={reopenGuideMutation.isPending}
+                onClick={() => reopenGuideMutation.mutate()}
+              >
+                Run setup guide again
+              </Button>
             </CardContent>
           </Card>
         </>

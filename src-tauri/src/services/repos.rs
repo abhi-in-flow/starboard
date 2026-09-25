@@ -5,6 +5,7 @@ use crate::models::{
     FacetCount, LibraryFacets, ListReposRequest, RepoDetail, RepoFilters, RepoListResult, RepoSort,
     RepoSummary,
 };
+use crate::services::review;
 
 pub const DEFAULT_PAGE_SIZE: i64 = 100;
 const MAX_LIMIT: i64 = 500;
@@ -15,8 +16,9 @@ pub fn list_repos(conn: &Connection, req: ListReposRequest) -> AppResult<RepoLis
     let sort_desc = req.sort_desc.unwrap_or(true);
     let limit = req.limit.unwrap_or(DEFAULT_PAGE_SIZE).clamp(1, MAX_LIMIT);
     let offset = req.offset.unwrap_or(0).max(0);
+    let now = review::review_now_iso();
 
-    let (where_sql, bind) = build_filter_clause(&filters, None)?;
+    let (where_sql, bind) = build_filter_clause_at(&filters, None, &now)?;
     let order_sql = order_by_clause(&sort, sort_desc, false);
 
     let total: i64 = {
@@ -43,6 +45,7 @@ pub fn list_repos(conn: &Connection, req: ListReposRequest) -> AppResult<RepoLis
     for row in rows {
         items.push(row?);
     }
+    review::attach_review_reason(&mut items, filters.review_preset.as_ref());
 
     Ok(RepoListResult {
         items,
@@ -70,6 +73,9 @@ pub fn get_repo(conn: &Connection, id: i64) -> AppResult<RepoDetail> {
     let (category_id, category_source) = load_primary_category(conn, id)?;
     detail.category_id = category_id;
     detail.category_source = category_source;
+    let (reviewed_at, snoozed_until) = review::load_review_state(conn, id)?;
+    detail.reviewed_at = reviewed_at;
+    detail.snoozed_until = snoozed_until;
     Ok(detail)
 }
 
@@ -80,7 +86,8 @@ pub fn library_facets(conn: &Connection, filters: Option<RepoFilters>) -> AppRes
     base.language = None;
     base.topic = None;
 
-    let (where_sql, bind) = build_filter_clause(&base, None)?;
+    let now = review::review_now_iso();
+    let (where_sql, bind) = build_filter_clause_at(&base, None, &now)?;
 
     let languages = {
         let sql = format!(
@@ -170,16 +177,24 @@ pub fn build_filter_clause(
     filters: &RepoFilters,
     fts_alias: Option<&str>,
 ) -> AppResult<(String, Vec<String>)> {
+    build_filter_clause_at(filters, fts_alias, &review::review_now_iso())
+}
+
+pub fn build_filter_clause_at(
+    filters: &RepoFilters,
+    fts_alias: Option<&str>,
+    now: &str,
+) -> AppResult<(String, Vec<String>)> {
     let mut clauses = Vec::new();
     let mut bind = Vec::new();
 
-    let hide_unstarred = filters.hide_unstarred.unwrap_or(true);
+    let hide_unstarred = review::effective_hide_unstarred(filters);
     if hide_unstarred {
         clauses.push("r.unstarred = 0".to_string());
     }
 
-    let hide_archived = filters.hide_archived.unwrap_or(true);
-    if filters.archived_only.unwrap_or(false) {
+    let hide_archived = review::effective_hide_archived(filters);
+    if filters.review_preset.is_none() && filters.archived_only.unwrap_or(false) {
         clauses.push("r.archived = 1".to_string());
     } else if hide_archived {
         clauses.push("r.archived = 0".to_string());
@@ -207,6 +222,8 @@ pub fn build_filter_clause(
         bind.push(category_id.to_string());
     }
 
+    review::append_review_clauses(filters, now, &mut clauses, &mut bind);
+
     if let Some(alias) = fts_alias {
         clauses.push(format!("{alias}.rowid = r.id"));
     }
@@ -229,6 +246,11 @@ pub fn order_by_clause(sort: &RepoSort, desc: bool, fts_rank: bool) -> String {
         RepoSort::Stars => format!("COALESCE(r.stars_count, -1) {dir}, r.full_name ASC, {tie}"),
         RepoSort::PushedAt => format!("COALESCE(r.pushed_at, '') {dir}, r.full_name ASC, {tie}"),
         RepoSort::Name => format!("r.full_name {dir}, {tie}"),
+        // Queue order is always oldest/most stale first; ignore dir.
+        RepoSort::Stale => format!(
+            "CASE WHEN r.pushed_at IS NULL THEN 0 ELSE 1 END ASC, \
+             datetime(r.pushed_at) ASC, datetime(r.starred_at) ASC, r.full_name ASC, {tie}"
+        ),
     };
     if fts_rank {
         format!("ORDER BY rank ASC, {secondary}")
@@ -258,6 +280,7 @@ fn map_summary(row: &Row<'_>) -> rusqlite::Result<RepoSummary> {
         unstarred: row.get::<_, i64>(8)? != 0,
         topics: parse_topics(topics_raw),
         relevance: None,
+        review_reason: None,
     })
 }
 
@@ -288,6 +311,8 @@ fn map_detail(row: &Row<'_>) -> rusqlite::Result<RepoDetail> {
         category_names: Vec::new(),
         category_id: None,
         category_source: None,
+        reviewed_at: None,
+        snoozed_until: None,
     })
 }
 

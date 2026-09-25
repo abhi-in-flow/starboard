@@ -7,6 +7,8 @@ export type AppSettings = {
   embedDimension: number;
   githubUsername: string | null;
   embeddingsNeedRebuild: boolean;
+  /** Defaults on when unset — assign new/uncategorized repos after sync. */
+  autoCategorizeAfterSync: boolean;
 };
 
 export type AuthStatus = {
@@ -19,6 +21,7 @@ export type UpdateSettingsRequest = {
   ollamaChatModel?: string;
   ollamaEmbedModel?: string;
   embedDimension?: number;
+  autoCategorizeAfterSync?: boolean;
 };
 
 export type AppError = {
@@ -62,7 +65,14 @@ export type IntegrityReport = {
   checkedAt: string;
 };
 
-export type RepoSort = "starredAt" | "stars" | "pushedAt" | "name";
+export type RepoSort = "starredAt" | "stars" | "pushedAt" | "name" | "stale";
+
+export type ReviewPreset =
+  | "uncategorized"
+  | "archived"
+  | "inactive"
+  | "forgotten"
+  | "unstarred";
 
 export type RepoFilters = {
   language?: string | null;
@@ -71,6 +81,7 @@ export type RepoFilters = {
   hideUnstarred?: boolean;
   hideArchived?: boolean;
   archivedOnly?: boolean;
+  reviewPreset?: ReviewPreset | null;
 };
 
 export type RepoSummary = {
@@ -86,6 +97,8 @@ export type RepoSummary = {
   topics: string[];
   /** Normalized fused relevance 0–100 for Semantic/Hybrid; absent for keyword/browse. */
   relevance?: number | null;
+  /** Why this repo is in the active review queue. */
+  reviewReason?: string | null;
 };
 
 export type RepoDetail = {
@@ -113,6 +126,8 @@ export type RepoDetail = {
   categoryNames: string[];
   categoryId: number | null;
   categorySource: string | null;
+  reviewedAt: string | null;
+  snoozedUntil: string | null;
 };
 
 export type FacetCount = {
@@ -320,11 +335,79 @@ export type CategorizationPanel = {
   uncategorizedRepos: number;
   llmAssignments: number;
   manualAssignments: number;
+  autoCategorizeAfterSync: boolean;
   categories: CategoryNode[];
+};
+
+export type DataPanel = {
+  dbPath: string;
+  lastBackupPath: string | null;
+  lastBackupAt: string | null;
+  lastBackupOk: boolean | null;
+  lastRestoreAt: string | null;
+};
+
+export type BackupValidation = {
+  ok: boolean;
+  path: string;
+  schemaVersion: number;
+  repoCount: number;
+  categoryCount: number;
+  message: string;
+};
+
+export type BackupResult = {
+  path: string;
+  createdAt: string;
+  schemaVersion: number;
+  repoCount: number;
+};
+
+export type RestoreResult = {
+  path: string;
+  restoredAt: string;
+  schemaVersion: number;
+  migrated: boolean;
+  preRestoreBackupPath: string;
+  repoCount: number;
 };
 
 export type SystemStatus = {
   embeddings: EmbeddingsPanel;
   categorization: CategorizationPanel;
   integrity?: IntegrityReport | null;
+  data: DataPanel;
+};
+
+/** Mirrored from SetupStatus — first-run checklist snapshot (no Ollama HTTP). */
+export type SetupStatus = {
+  githubConnected: boolean;
+  githubUsername: string | null;
+  lastSyncedAt: string | null;
+  repoCount: number;
+  ollamaBaseUrl: string;
+  ollamaChatModel: string;
+  ollamaConfigured: boolean;
+  categoryCount: number;
+  categorizedRepos: number;
+  assignmentCoverage: number;
+  embeddedRepos: number;
+  embeddingCoverage: number;
+  onboardingCompleted: boolean;
+};
+
+export type ReviewCounts = {
+  uncategorized: number;
+  archived: number;
+  inactive: number;
+  forgotten: number;
+  unstarred: number;
+  activeStars: number;
+  oldestStarredAt: string | null;
+};
+
+export type SetRepoReviewRequest = {
+  repoId: number;
+  reviewed?: boolean | null;
+  snoozeDays?: number | null;
 };
