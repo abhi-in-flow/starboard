@@ -25,6 +25,8 @@ import {
   startAssignment,
   updateTaxonomy,
 } from "@/lib/tauri";
+import { usePrefersReducedMotion } from "@/lib/useMediaQuery";
+import { useUiStore } from "@/store/ui";
 import type {
   AppError,
   CategorizeProgress,
@@ -137,6 +139,9 @@ function toTaxonomyEdit(cats: DraftCat[]): TaxonomyEdit {
 
 export function CategoriesView() {
   const queryClient = useQueryClient();
+  const categoriesSection = useUiStore((s) => s.categoriesSection);
+  const setCategoriesSection = useUiStore((s) => s.setCategoriesSection);
+  const reduceMotion = usePrefersReducedMotion();
   const [draft, setDraft] = useState<DraftCat[] | null>(null);
   const [editorMode, setEditorMode] = useState<EditorMode>("create");
   const [progress, setProgress] = useState<CategorizeProgress | null>(null);
@@ -169,12 +174,28 @@ export function CategoriesView() {
         void queryClient.invalidateQueries({ queryKey: ["categories"] });
         void queryClient.invalidateQueries({ queryKey: ["repos"] });
         void queryClient.invalidateQueries({ queryKey: ["repo"] });
+        void queryClient.invalidateQueries({ queryKey: ["setupStatus"] });
       }
     }).then((fn) => {
       unlisten = fn;
     });
     return () => unlisten?.();
   }, [queryClient]);
+
+  useEffect(() => {
+    if (!categoriesSection) {
+      return;
+    }
+    const id =
+      categoriesSection === "taxonomy"
+        ? "categories-taxonomy"
+        : "categories-assign";
+    document.getElementById(id)?.scrollIntoView({
+      behavior: reduceMotion ? "auto" : "smooth",
+      block: "start",
+    });
+    setCategoriesSection(null);
+  }, [categoriesSection, setCategoriesSection, reduceMotion]);
 
   const generateMutation = useMutation({
     mutationFn: generateTaxonomy,
@@ -209,6 +230,7 @@ export function CategoriesView() {
       setDraft(null);
       setEditorMode("create");
       void queryClient.invalidateQueries({ queryKey: ["categories"] });
+      void queryClient.invalidateQueries({ queryKey: ["setupStatus"] });
     },
     onError: (err) => setActionError(errorMessage(err)),
   });
@@ -222,6 +244,7 @@ export function CategoriesView() {
       void queryClient.invalidateQueries({ queryKey: ["categories"] });
       void queryClient.invalidateQueries({ queryKey: ["repos"] });
       void queryClient.invalidateQueries({ queryKey: ["repo"] });
+      void queryClient.invalidateQueries({ queryKey: ["setupStatus"] });
     },
     onError: (err) => setActionError(errorMessage(err)),
   });
@@ -238,6 +261,7 @@ export function CategoriesView() {
         message: "Starting assignment…",
       });
       void queryClient.invalidateQueries({ queryKey: ["categorizeStatus"] });
+      void queryClient.invalidateQueries({ queryKey: ["setupStatus"] });
     },
     onError: (err) => {
       const message = errorMessage(err);
@@ -263,7 +287,7 @@ export function CategoriesView() {
   const offline = ollama.data != null && !ollama.data.available;
   const offlineHint =
     ollama.data?.message ||
-    "Ollama offline — set base URL + chat model in Settings.";
+    "Ollama is unreachable — set a base URL and chat model in Settings.";
   const hasCommitted = (categories.data?.length ?? 0) > 0;
   const running = categorizeStatus.data?.running === true;
   const saving = commitMutation.isPending || saveEditMutation.isPending;
@@ -387,7 +411,9 @@ export function CategoriesView() {
         </div>
         {ollama.data ? (
           <Badge variant={ollama.data.available ? "default" : "secondary"}>
-            {ollama.data.available ? "Ollama online" : "Ollama offline"}
+            {ollama.data.available
+              ? "Ollama is reachable"
+              : "Ollama is unreachable"}
           </Badge>
         ) : null}
       </div>
@@ -399,17 +425,23 @@ export function CategoriesView() {
       ) : null}
 
       {actionNotice ? (
-        <p className="rounded-md border border-border bg-muted/40 px-3 py-2 text-sm text-muted-foreground">
+        <p
+          className="rounded-md border border-border bg-muted/40 px-3 py-2 text-sm text-muted-foreground"
+          role="status"
+        >
           {actionNotice}
         </p>
       ) : null}
       {actionError ? (
-        <p className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+        <p
+          className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive"
+          role="alert"
+        >
           {actionError}
         </p>
       ) : null}
 
-      <Card>
+      <Card id="categories-taxonomy">
         <CardHeader>
           <CardTitle className="text-base">1. Taxonomy</CardTitle>
           <CardDescription>
@@ -569,12 +601,14 @@ export function CategoriesView() {
         </CardContent>
       </Card>
 
-      <Card>
+      <Card id="categories-assign">
         <CardHeader>
           <CardTitle className="text-base">2. Assign repos</CardTitle>
           <CardDescription>
             Batches uncategorized repos against the committed taxonomy. Manual
-            overrides are never overwritten.
+            overrides are never overwritten. When auto-categorize is on in
+            Settings, new uncategorized repos are assigned after sync once
+            READMEs finish.
           </CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-3">

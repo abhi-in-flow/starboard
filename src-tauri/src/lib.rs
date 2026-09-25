@@ -9,7 +9,9 @@ pub use services::sanitize::is_safe_markdown_url;
 
 use tauri::Manager;
 
-use commands::{auth, categorize, embed, insights, repos, settings, status, sync};
+use commands::{
+    auth, backup, categorize, embed, insights, repos, review, settings, setup, status, sync,
+};
 use services::categorizer::CategorizeState;
 use services::embed::EmbedState;
 use services::store::{self, DbState};
@@ -29,8 +31,9 @@ pub fn run() {
             app.manage(CategorizeState::default());
             app.manage(EmbedState::default());
             // Resume unfinished README work from a previous session.
-            // When the README queue is empty or finishes, it also kicks silent
-            // auto-embed for stale/missing rows (see spawn_readme_queue_if_needed).
+            // When the README queue is empty or finishes, it kicks silent
+            // auto-categorize (eligible uncategorized repos) and auto-embed
+            // (see spawn_readme_queue_if_needed).
             services::sync::spawn_readme_queue_if_needed(app.handle().clone());
             Ok(())
         })
@@ -51,6 +54,8 @@ pub fn run() {
             repos::get_repo,
             repos::get_library_facets,
             repos::list_categories,
+            review::get_review_counts,
+            review::set_repo_review,
             categorize::get_ollama_status,
             categorize::generate_taxonomy,
             categorize::get_taxonomy_edit,
@@ -70,6 +75,11 @@ pub fn run() {
             insights::write_library_export,
             status::get_system_status,
             status::check_db_integrity,
+            setup::get_setup_status,
+            setup::set_onboarding_completed,
+            backup::create_backup,
+            backup::validate_backup,
+            backup::restore_backup,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

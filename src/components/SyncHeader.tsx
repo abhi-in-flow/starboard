@@ -15,6 +15,8 @@ import {
   resumeReadmeQueue,
   startSync,
 } from "@/lib/tauri";
+import { usePrefersReducedMotion } from "@/lib/useMediaQuery";
+import { useUiStore } from "@/store/ui";
 import type { SyncProgress } from "@/types";
 
 function formatRelative(iso: string | null | undefined): string {
@@ -43,6 +45,8 @@ function formatRelative(iso: string | null | undefined): string {
 
 export function SyncHeader() {
   const queryClient = useQueryClient();
+  const openSettings = useUiStore((s) => s.openSettings);
+  const reduceMotion = usePrefersReducedMotion();
   const [progress, setProgress] = useState<SyncProgress | null>(null);
   const [syncError, setSyncError] = useState<string | null>(null);
   const [syncNotice, setSyncNotice] = useState<string | null>(null);
@@ -110,6 +114,8 @@ export function SyncHeader() {
     },
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["syncStatus"] });
+      void queryClient.invalidateQueries({ queryKey: ["setupStatus"] });
+      void queryClient.invalidateQueries({ queryKey: ["repos"] });
     },
     onError: (err) => {
       const outcome = classifyJobFailure(err, "Sync failed");
@@ -211,6 +217,7 @@ export function SyncHeader() {
           {statusLine ? (
             <p
               className="truncate text-xs text-muted-foreground"
+              role="status"
               title={statusLine}
             >
               {statusLine}
@@ -228,7 +235,11 @@ export function SyncHeader() {
             </p>
           ) : null}
           {syncNotice ? (
-            <p className="text-xs text-muted-foreground" title={syncNotice}>
+            <p
+              className="text-xs text-muted-foreground"
+              role="status"
+              title={syncNotice}
+            >
               {syncNotice}
             </p>
           ) : null}
@@ -287,10 +298,15 @@ export function SyncHeader() {
       {showProgress ? (
         <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted">
           <div
-            className="h-full bg-primary transition-all duration-300"
+            className="h-full bg-primary transition-all duration-300 motion-reduce:transition-none"
             style={{
-              width: pct === null ? "35%" : `${Math.max(pct, 2)}%`,
-              ...(pct === null
+              width:
+                pct === null
+                  ? reduceMotion
+                    ? "100%"
+                    : "35%"
+                  : `${Math.max(pct, 2)}%`,
+              ...(pct === null && !reduceMotion
                 ? { animation: "pulse 1.2s ease-in-out infinite" }
                 : {}),
             }}
@@ -299,7 +315,14 @@ export function SyncHeader() {
       ) : null}
       {!connected ? (
         <p className="text-xs text-muted-foreground">
-          Connect a GitHub token in Settings to sync starred repos.
+          <button
+            type="button"
+            className="underline-offset-2 hover:underline"
+            onClick={() => openSettings("github")}
+          >
+            Connect a GitHub token
+          </button>{" "}
+          in Settings to sync starred repos.
         </p>
       ) : null}
     </header>

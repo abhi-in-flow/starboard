@@ -48,6 +48,8 @@ function CategoryItem({ node, depth }: { node: CategoryNode; depth: number }) {
           }
           assign.mutate({ repoId, catId: node.id });
         }}
+        aria-pressed={active}
+        aria-current={active ? "true" : undefined}
         className={cn(
           "flex w-full items-center justify-between rounded-md px-2 py-1.5 text-left text-sm transition-colors",
           active
@@ -83,8 +85,9 @@ export function CategoryTree() {
         <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
           Categories
         </p>
-        <p className="mt-1 text-[11px] text-muted-foreground">
-          Drop a repo here to set a manual category.
+        <p className="mt-1 text-[11px] text-foreground/70">
+          Drop a repo here to set a manual category. On smaller screens, assign
+          from the detail picker.
         </p>
       </div>
       <div className="flex-1 overflow-auto p-2">

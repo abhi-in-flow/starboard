@@ -125,3 +125,5 @@ export function MarkdownExcerpt({ markdown }: Props) {
     </div>
   );
 }
+
+export default MarkdownExcerpt;

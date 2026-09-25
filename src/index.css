@@ -49,7 +49,7 @@
   --secondary: oklch(0.95 0.01 255);
   --secondary-foreground: oklch(0.3 0.03 255);
   --muted: oklch(0.95 0.008 255);
-  --muted-foreground: oklch(0.5 0.02 255);
+  --muted-foreground: oklch(0.42 0.02 255);
   --accent: oklch(0.94 0.015 230);
   --accent-foreground: oklch(0.28 0.04 255);
   --destructive: oklch(0.55 0.2 25);
@@ -75,7 +75,17 @@
     margin: 0;
     min-height: 100vh;
   }
+  html,
+  body,
   #root {
-    min-height: 100vh;
+    height: 100%;
+    min-height: 100svh;
+    overflow: hidden;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
   }
 }

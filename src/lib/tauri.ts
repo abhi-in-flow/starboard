@@ -2,6 +2,8 @@ import { invoke } from "@tauri-apps/api/core";
 import type {
   AppSettings,
   AuthStatus,
+  BackupResult,
+  BackupValidation,
   CategorizeStatus,
   CategoryNode,
   EmbedStatus,
@@ -16,7 +18,11 @@ import type {
   RepoDetail,
   RepoFilters,
   RepoListResult,
+  RestoreResult,
+  ReviewCounts,
   SearchReposRequest,
+  SetRepoReviewRequest,
+  SetupStatus,
   SharePoint,
   SyncResult,
   SyncStatus,
@@ -178,4 +184,32 @@ export function getSystemStatus() {
 
 export function checkDbIntegrity() {
   return invoke<IntegrityReport>("check_db_integrity");
+}
+
+export function getSetupStatus() {
+  return invoke<SetupStatus>("get_setup_status");
+}
+
+export function setOnboardingCompleted(completed: boolean) {
+  return invoke<SetupStatus>("set_onboarding_completed", { completed });
+}
+
+export function getReviewCounts() {
+  return invoke<ReviewCounts>("get_review_counts");
+}
+
+export function setRepoReview(request: SetRepoReviewRequest) {
+  return invoke<void>("set_repo_review", { request });
+}
+
+export function createBackup(path: string) {
+  return invoke<BackupResult>("create_backup", { path });
+}
+
+export function validateBackup(path: string) {
+  return invoke<BackupValidation>("validate_backup", { path });
+}
+
+export function restoreBackup(path: string) {
+  return invoke<RestoreResult>("restore_backup", { path });
 }

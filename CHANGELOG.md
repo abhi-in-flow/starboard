@@ -1,5 +1,43 @@
 # Changelog
 
+## 0.13.1 — Accessibility and list-interaction corrections
+
+- Virtualizer no longer snaps back on query invalidation; ArrowDown page-advance is bound to generation + source id.
+- Detail overlay is a real Dialog; heatmap cells are noninteractive; Hide archived locks on Inactive/Forgotten.
+- Honest list/toolbar/settings semantics, pagination retry, health-trigger aggregate state, and reduced-motion charts/scroll.
+- Library ↑/↓ and `/` yield to open Selects, dialogs, and other key-owning composites.
+
+## 0.13.0 — UI and accessibility polish
+
+- Contextual empty states, library toolbar hierarchy, named filter chips, sort direction, and search mode-used fallback.
+- Keyboard listbox scrolling, responsive category/detail layout, and reduced-motion-aware accessibility.
+- Global health strip, Insights period narrative with precise dormant wording, and user-facing Settings/backup copy.
+- Lazy-loaded Insights, Categories, and Settings views to shrink the main bundle.
+
+## 0.12.0 — Backup and restore
+
+- Settings → Status Data section: create a consistent SQLite backup, validate a file, and restore with explicit confirmation. Database integrity stays on the existing Status integrity card.
+- Restore validates schema/integrity, refuses while sync/embed/categorize/README is running, writes a pre-restore safety copy, and rolls the live DB back if anything fails.
+- GitHub PAT stays in the OS keyring and is never part of backup or restore.
+
+## 0.11.0 — Stale-star review
+
+- Library Review presets: Uncategorized, Archived (still starred), Inactive (no push in 12+ months), Possibly forgotten (starred 24+ months and no push in 18+ months), and Unstarred history.
+- Local Reviewed / Snooze (1 week, 1 month, 3 months, 6 months) via migration 004; queues order oldest/stale first and never write stars back to GitHub.
+- Insights deep-links Dormant / Archived / Uncategorized into matching Library review queues; presets compose with search and filters.
+
+## 0.10.0 — Guided onboarding
+
+- First-run setup guide walks through GitHub PAT, initial sync, and optional Ollama / taxonomy / assignment / embeddings.
+- Step completion is derived from backend truth (auth, sync history, categories, embeddings); dismissal persists in settings and can be reopened from Settings → General.
+- Optional AI steps never block Keyword-only use, Skip for now, or Finish setup.
+
+## 0.9.0 — Automatic categorization
+
+- After a successful GitHub sync and README drain, new uncategorized repos are assigned automatically when a taxonomy is committed and Ollama is reachable.
+- The same pass resumes on launch if eligible uncategorized work remains; manual overrides are never overwritten.
+- Auto-categorize after sync is on by default (toggle in Settings → Ollama). Silent no-op when disabled, offline, or nothing is pending.
+
 ## 0.8.0 — Production hardening
 
 - SQLite WAL/FK/busy_timeout/`synchronous=NORMAL`, transactional sync/taxonomy/embed/auth writes, ETag persisted only after apply commits, orphaned `sync_log` reconciliation, and migration 003 indexes plus README/document-hash columns.
